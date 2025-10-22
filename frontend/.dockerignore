@@ -1,0 +1,8 @@
+node_modules
+dist
+*.log
+.angular
+.git
+.gitignore
+.DS_Store
+

@@ -1,0 +1,25 @@
+import { Component } from '@angular/core';
+
+@Component({
+  selector: 'arch-matching',
+  standalone: true,
+  template: `
+  <h2 class="text-xl font-semibold mb-4">Professional Matching</h2>
+  <div class="text-gray-600 mb-3">AI-powered recommendations (placeholder)</div>
+  <div class="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
+    <div class="border rounded p-3" *ngFor="let p of demo">
+      <div class="font-medium">{{p.name}}</div>
+      <div class="text-sm text-gray-500">{{p.specialty}} · {{p.city}}</div>
+      <button class="mt-2 px-3 py-1 border rounded">View Profile</button>
+    </div>
+  </div>
+  `
+})
+export class MatchingPage {
+  demo = [
+    { name: 'Studio A', specialty: 'Residential', city: 'Nairobi' },
+    { name: 'Design Co.', specialty: 'Commercial', city: 'Kisumu' },
+    { name: 'GreenBuild', specialty: 'Sustainable', city: 'Mombasa' },
+  ];
+}
+
