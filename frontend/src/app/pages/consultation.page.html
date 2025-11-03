@@ -1,18 +1,20 @@
-<h2 class="text-xl font-semibold mb-4">Consultation Booking</h2>
-<form class="grid gap-3 max-w-xl" (ngSubmit)="book()">
-  <label class="grid gap-1">
-    <span class="text-sm text-gray-600">Preferred Date</span>
-    <input type="date" class="border rounded px-3 py-2" [(ngModel)]="date" name="date" />
-  </label>
-  <label class="grid gap-1">
-    <span class="text-sm text-gray-600">Preferred Time</span>
-    <input type="time" class="border rounded px-3 py-2" [(ngModel)]="time" name="time" />
-  </label>
-  <label class="grid gap-1">
-    <span class="text-sm text-gray-600">Notes</span>
-    <textarea class="border rounded px-3 py-2" [(ngModel)]="notes" name="notes" placeholder="Agenda, stakeholders..."></textarea>
-  </label>
-  <button type="submit" class="px-4 py-2 bg-blue-600 text-white rounded w-max">Book</button>
-</form>
-<p *ngIf="message" class="mt-3 text-green-700">{{message}}</p>
-
+<section class="container section">
+  <h1 class="text-2xl font-semibold text-slate-900">Consultation Booking</h1>
+  <p class="mt-2 max-w-2xl text-sm text-slate-600">Book a structured discovery to align feasibility, risks, and next steps.</p>
+  <form class="mt-6 grid gap-3 max-w-xl rounded-3xl border border-slate-200 bg-white/90 p-6 elev-soft" (ngSubmit)="book()">
+    <label class="grid gap-1">
+      <span class="text-xs font-semibold uppercase tracking-wide text-slate-500">Preferred Date</span>
+      <input type="date" class="rounded-xl border border-slate-200 px-3 py-2 text-sm" [(ngModel)]="date" name="date" />
+    </label>
+    <label class="grid gap-1">
+      <span class="text-xs font-semibold uppercase tracking-wide text-slate-500">Preferred Time</span>
+      <input type="time" class="rounded-xl border border-slate-200 px-3 py-2 text-sm" [(ngModel)]="time" name="time" />
+    </label>
+    <label class="grid gap-1">
+      <span class="text-xs font-semibold uppercase tracking-wide text-slate-500">Notes</span>
+      <textarea class="rounded-xl border border-slate-200 px-3 py-2 text-sm" [(ngModel)]="notes" name="notes" placeholder="Agenda, stakeholders..."></textarea>
+    </label>
+    <button type="submit" class="btn-primary w-max">Book</button>
+  </form>
+  <p *ngIf="message" class="mt-3 text-sm text-green-700">{{message}}</p>
+</section>

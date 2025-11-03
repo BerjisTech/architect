@@ -1,3 +1,28 @@
 @import "https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined";
 @import "tailwindcss";
+
+/* Premium slate/blue/gold theme helpers */
+:root {
+  --arch-bg: 246 245 241; /* near white */
+  --arch-slate: 15 23 42; /* slate-900 */
+  --arch-blue: 30 58 138; /* blue-900 */
+  --arch-gold: 234 179 8; /* yellow-500/600 midpoint */
+}
+
+.hero-gradient { background: radial-gradient(1200px 600px at 80% -10%, rgba(30,58,138,0.18), transparent 60%), linear-gradient(180deg, rgb(15 23 42) 0%, rgb(30 58 138) 100%); }
+.arch-hero { background: radial-gradient(1200px 600px at 80% -10%, rgba(30,58,138,0.08), transparent 60%), radial-gradient(1000px 800px at -10% 10%, rgba(234,179,8,0.08), transparent 55%); }
+
+.elev-card { box-shadow: 0 12px 24px rgba(15,23,42,0.06), 0 4px 12px rgba(15,23,42,0.05); }
+.elev-soft { box-shadow: 0 8px 16px rgba(15,23,42,0.05); }
+.hover-rise { transition: transform .2s ease, box-shadow .2s ease; }
+.hover-rise:hover { transform: translateY(-4px); box-shadow: 0 16px 32px rgba(15,23,42,0.08); }
+
+.pill-gold { @apply inline-flex items-center rounded-full border border-yellow-400/60 bg-yellow-50 px-3 py-1 text-[11px] font-semibold text-slate-900; }
+.btn-primary { @apply inline-flex items-center rounded-xl bg-blue-900 px-5 py-2.5 text-sm font-semibold text-white shadow shadow-blue-900/30 hover:-translate-y-0.5 hover:bg-blue-800 transition; }
+.btn-gold { @apply inline-flex items-center rounded-xl bg-yellow-400 px-5 py-2.5 text-sm font-semibold text-slate-900 shadow hover:-translate-y-0.5 hover:bg-yellow-300 transition; }
+.btn-ghost { @apply inline-flex items-center rounded-xl border border-slate-300 px-5 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50 transition; }
+
+/* Section spacing */
+.section { @apply py-12; }
+.container { @apply mx-auto max-w-screen-2xl px-8; }
 @custom-variant dark (&:where(.dark, .dark *));

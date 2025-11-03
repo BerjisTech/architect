@@ -1,12 +1,80 @@
-<section class="space-y-4">
-  <h1 class="text-2xl font-bold">Welcome</h1>
-  <p class="text-gray-600">Start your project: create a brief, assess the site, match professionals, and plan consultations.</p>
-  <div class="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
-    <a routerLink="/project-brief" class="block p-4 border rounded hover:bg-gray-50">Project Brief</a>
-    <a routerLink="/site-assessment" class="block p-4 border rounded hover:bg-gray-50">Site Assessment</a>
-    <a routerLink="/matching" class="block p-4 border rounded hover:bg-gray-50">Professional Matching</a>
-    <a routerLink="/consultation" class="block p-4 border rounded hover:bg-gray-50">Consultation Booking</a>
-    <a routerLink="/regulatory-checklist" class="block p-4 border rounded hover:bg-gray-50">Regulatory Checklist</a>
+<!-- Hero -->
+<section class="hero-gradient min-h-[90vh] w-full py-20">
+  <div class="container">
+    <div class="max-w-4xl">
+      <h1 class="text-4xl font-semibold leading-tight text-slate-50 sm:text-5xl">
+        From concept to handover — one platform for serious builds
+      </h1>
+      <p class="mt-4 max-w-3xl text-slate-200">
+        A connected, professional workflow: brief, site, design, budgeting, permits, procurement, and contractors — orchestrated to deliver on time and on standard.
+      </p>
+      <div class="mt-8 flex flex-wrap gap-4">
+        <a routerLink="/project-brief" class="btn-gold">Start Project Brief</a>
+        <a routerLink="/matching" class="btn-ghost">Find Professionals</a>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="w-full bg-slate-50 py-12">
+  <div class="container">
+    <h2 class="text-xl font-semibold text-slate-900">Plan · Design · Approve · Build</h2>
+    <div class="mt-6 grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-4">
+      <div class="rounded-2xl border border-slate-200 bg-white p-5 elev-soft hover-rise">
+        <p class="text-xs font-semibold uppercase tracking-wide text-blue-900">Project Brief</p>
+        <h3 class="mt-1 text-base font-semibold text-slate-900">Define scope, budget, and goals</h3>
+        <p class="mt-2 text-sm text-slate-600">A guided intake captures site, zoning, budget range, timeline, and style to align the team from day one.</p>
+        <a routerLink="/project-brief" class="mt-3 inline-flex text-sm font-semibold text-blue-900 hover:text-blue-800">Open brief →</a>
+      </div>
+      <div class="rounded-2xl border border-slate-200 bg-white p-5 elev-soft hover-rise">
+        <p class="text-xs font-semibold uppercase tracking-wide text-blue-900">Site Assessment</p>
+        <h3 class="mt-1 text-base font-semibold text-slate-900">Know the land, remove surprises</h3>
+        <p class="mt-2 text-sm text-slate-600">Upload surveys, soils and zoning; invite planners and surveyors to collaborate on constraints and opportunities.</p>
+        <a routerLink="/site-assessment" class="mt-3 inline-flex text-sm font-semibold text-blue-900 hover:text-blue-800">Assess site →</a>
+      </div>
+      <div class="rounded-2xl border border-slate-200 bg-white p-5 elev-soft hover-rise">
+        <p class="text-xs font-semibold uppercase tracking-wide text-blue-900">Professional Matching</p>
+        <h3 class="mt-1 text-base font-semibold text-slate-900">Assemble an A‑team for your brief</h3>
+        <p class="mt-2 text-sm text-slate-600">Architects, engineers, surveyors, QS — matched to budget, location, and portfolio fit.</p>
+        <a routerLink="/matching" class="mt-3 inline-flex text-sm font-semibold text-blue-900 hover:text-blue-800">Match experts →</a>
+      </div>
+      <div class="rounded-2xl border border-slate-200 bg-white p-5 elev-soft hover-rise">
+        <p class="text-xs font-semibold uppercase tracking-wide text-blue-900">Regulatory</p>
+        <h3 class="mt-1 text-base font-semibold text-slate-900">Permits and approvals, organised</h3>
+        <p class="mt-2 text-sm text-slate-600">Auto‑generated checklists, timelines, and submissions tailored to location and project type.</p>
+        <a routerLink="/regulatory-checklist" class="mt-3 inline-flex text-sm font-semibold text-blue-900 hover:text-blue-800">View checklist →</a>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- Animated value blocks -->
+<section class="container grid gap-6 py-10 md:grid-cols-3">
+  <div class="group rounded-3xl border border-slate-200 bg-white/90 p-6 elev-card hover-rise">
+    <div class="text-sm font-semibold uppercase tracking-wide text-blue-900">Design Studio</div>
+    <h3 class="mt-2 text-lg font-semibold text-slate-900">2D → 3D with real‑time collaboration</h3>
+    <p class="mt-2 text-sm text-slate-600">Floor plans with instant 3D, live co‑editing across architecture, structure, and MEP, version control, and exports (DWG, IFC, Revit).</p>
+  </div>
+  <div class="group rounded-3xl border border-slate-200 bg-white/90 p-6 elev-card hover-rise">
+    <div class="text-sm font-semibold uppercase tracking-wide text-blue-900">Costs & Procurement</div>
+    <h3 class="mt-2 text-lg font-semibold text-slate-900">Live BoQ, budgeting, and smart ordering</h3>
+    <p class="mt-2 text-sm text-slate-600">Automatic takeoffs, value engineering, lender‑ready budgets, and one‑click ordering with reliable logistics.</p>
+  </div>
+  <div class="group rounded-3xl border border-slate-200 bg-white/90 p-6 elev-card hover-rise">
+    <div class="text-sm font-semibold uppercase tracking-wide text-blue-900">Contractors</div>
+    <h3 class="mt-2 text-lg font-semibold text-slate-900">Bid, select, and coordinate trades</h3>
+    <p class="mt-2 text-sm text-slate-600">Verified contractors near you, sealed bids, comparison matrices, digital contracts, and coordinated schedules.</p>
+  </div>
+</section>
+
+<!-- CTA -->
+<section class="container my-12 rounded-3xl border border-yellow-400/60 bg-yellow-50 p-8 text-slate-900 elev-soft">
+  <div class="flex flex-col items-start justify-between gap-4 md:flex-row md:items-center">
+    <div>
+      <h3 class="text-lg font-semibold">Ready to move from idea to reality?</h3>
+      <p class="mt-1 text-sm text-slate-700">Create your brief to unlock a tailored plan, clear costs, and the right team.</p>
+    </div>
+    <a routerLink="/project-brief" class="btn-primary">Create a Project Brief</a>
   </div>
 </section>
 

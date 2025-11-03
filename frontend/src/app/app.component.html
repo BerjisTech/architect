@@ -1,18 +1,19 @@
-<header class="w-full border-b bg-white/80 backdrop-blur">
-  <nav class="mx-auto max-w-6xl px-4 py-3 flex items-center gap-6">
-    <a routerLink="/" class="text-xl font-semibold">Architect</a>
-    <a routerLink="/project-brief" class="text-gray-600 hover:text-gray-900">Project Brief</a>
-    <a routerLink="/site-assessment" class="text-gray-600 hover:text-gray-900">Site Assessment</a>
-    <a routerLink="/matching" class="text-gray-600 hover:text-gray-900">Matching</a>
-    <a routerLink="/consultation" class="text-gray-600 hover:text-gray-900">Consultation</a>
-    <a routerLink="/regulatory-checklist" class="text-gray-600 hover:text-gray-900">Checklist</a>
-    <a routerLink="/studio" class="text-gray-600 hover:text-gray-900">Studio</a>
-    <span class="ml-auto text-sm text-gray-500"><a href="/api/v1/health" class="underline">Core API</a> · <a href="/svc/v1/health" class="underline">Service</a></span>
+<header class="w-full border-b border-slate-200 bg-white/90 backdrop-blur">
+  <nav class="mx-auto flex max-w-7xl items-center gap-6 px-6 py-4">
+    <a routerLink="/" class="text-xl font-semibold text-slate-900">Architect</a>
+    <a routerLink="/project-brief" class="text-sm text-slate-600 hover:text-slate-900">Project Brief</a>
+    <a routerLink="/site-assessment" class="text-sm text-slate-600 hover:text-slate-900">Site Assessment</a>
+    <a routerLink="/matching" class="text-sm text-slate-600 hover:text-slate-900">Matching</a>
+    <a routerLink="/consultation" class="text-sm text-slate-600 hover:text-slate-900">Consultation</a>
+    <a routerLink="/regulatory-checklist" class="text-sm text-slate-600 hover:text-slate-900">Checklist</a>
+    <a routerLink="/studio" class="text-sm text-slate-600 hover:text-slate-900">Studio</a>
+    <span class="ml-auto text-xs text-slate-500"><a href="/api/v1/health" class="underline">Core API</a> · <a href="/svc/v1/health" class="underline">Service</a></span>
   </nav>
 </header>
 
-<main class="mx-auto max-w-6xl p-4">
+<main class="mx-auto max-w-7xl px-6">
   <router-outlet></router-outlet>
-  
-  <footer class="mt-12 text-xs text-gray-500">Unified auth via api.berjis.tech cookies</footer>
+  <footer class="mt-16 border-t border-slate-200 py-8 text-xs text-slate-500">Unified auth via api.berjis.tech cookies</footer>
 </main>
+
+
