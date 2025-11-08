@@ -1,4 +1,4 @@
-import { Component, ElementRef, HostListener, ViewChild } from '@angular/core';
+import { Component, ElementRef, HostListener, OnInit, ViewChild } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { StudioService } from '../services/studio.service';
@@ -11,8 +11,16 @@ type Point = { x: number; y: number };
   imports: [CommonModule, FormsModule],
   templateUrl: './design-studio.page.html'
 })
-export class DesignStudioPage {
+export class DesignStudioPage implements OnInit {
   @ViewChild('pane', { static: true }) pane!: ElementRef<HTMLDivElement>;
+
+  // UI state
+  toolset: 'project'|'build'|'info'|'objects'|'styleboards'|'finishes'|'exports'|'help' = 'project';
+  viewPort: '2d'|'3d' = '2d';
+  units: 'm'|'ft' = 'm';
+  lockConstruction = false;
+  lockLabels = false;
+  lockFurniture = false;
 
   // Drawing state
   mode: 'select'|'pan'|'wall' = 'select';
@@ -32,6 +40,20 @@ export class DesignStudioPage {
   loadId = '';
   lastSaved = '';
   error = '';
+
+  title = 'Architect';
+  isDark = false;
+  ngOnInit(): void {
+    const persisted = (localStorage.getItem('theme') || '').toLowerCase();
+    const preferDark = persisted === 'dark';
+    this.setTheme(preferDark ? 'dark' : 'light');
+  }
+  toggleTheme() { this.setTheme(this.isDark ? 'light' : 'dark'); }
+  private setTheme(mode: 'light' | 'dark') {
+    this.isDark = mode === 'dark';
+    document.documentElement.classList.toggle('dark', mode === 'dark');
+    try { localStorage.setItem('theme', mode); } catch {}
+  }
 
   viewBox() { return `${this.minX} ${this.minY} ${this.width} ${this.height}`; }
   pointsAttr(pts: Point[]) { return pts.map(p => `${p.x},${p.y}`).join(' '); }
