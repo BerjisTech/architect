@@ -20,7 +20,7 @@
   <div #viewportArea class="relative h-[calc(100vh-70px)] w-screen overflow-hidden">
     <!-- Left floating toolset -->
     <div #leftSideBar
-      class="absolute top-5 left-5  w-auto overflow-hidden flex items-start justify-start gap-3">
+      class="absolute top-5 left-5 z-10 w-auto overflow-hidden flex items-start justify-start gap-3">
       <div #toolsIcons
         class="h-full w-[52px] bg-blue-50 dark:bg-blue-950 p-2 rounded-lg overflow-x-hidden overflow-y-auto flex flex-col items-stretch justify-start gap-1 shadow-lg">
         <button
@@ -73,26 +73,27 @@
           </div>
           <div class="text-xs text-slate-600">Scale: 1:{{scale | number:'1.0-2'}} · Walls: {{walls.length}}</div>
           <div *ngIf="creating" class="text-xs text-blue-700">Drawing wall: click to add points, Finish to end.</div>
-          <div class="flex flex-col items-center gap-3 text-sm">
-            <input class="rounded px-2 py-1" placeholder="Plan name" [(ngModel)]="name" />
-            <input class="rounded px-2 py-1 w-40" placeholder="Load ID" [(ngModel)]="loadId" />
-            <button class="btn-ghost" (click)="loadById()" [disabled]="!loadId">Load</button>
-            <button class="btn-primary" (click)="save()" [disabled]="!name">Save</button>
-            <span *ngIf="lastSaved" class="text-xs text-green-700">Saved {{lastSaved}}</span>
-            <span *ngIf="error" class="text-xs text-rose-700">{{error}}</span>
-          </div>
         </div>
 
         <!-- BUILD -->
         <div *ngIf="toolset==='build'" class="space-y-3 text-sm">
           <div class="font-semibold text-slate-900 dark:text-white">Build</div>
           <div class="flex flex-wrap gap-2">
-            <button class="px-3 py-1 rounded" [class.bg-gray-200]="mode==='select'"
-              (click)="mode='select'">Select</button>
+            <button class="px-3 py-1 rounded" [class.bg-gray-200]="mode==='select'" (click)="mode='select'">Select</button>
             <button class="px-3 py-1 rounded" [class.bg-gray-200]="mode==='pan'" (click)="mode='pan'">Pan</button>
-            <button class="px-3 py-1 rounded" [class.bg-gray-200]="mode==='wall'" (click)="startWall()">Wall</button>
-            <button class="px-3 py-1 rounded" (click)="finishWall()" [disabled]="!creating">Finish</button>
+            <button class="px-3 py-1 rounded" [class.bg-blue-200]="mode==='wall'" (click)="mode='wall'">Wall</button>
+            <button class="px-3 py-1 rounded" [class.bg-blue-200]="mode==='room'" (click)="mode='room'">Room</button>
+            <button class="px-3 py-1 rounded" [class.bg-blue-200]="mode==='door'" (click)="mode='door'">Door</button>
+            <button class="px-3 py-1 rounded" [class.bg-blue-200]="mode==='window'" (click)="mode='window'">Window</button>
             <button class="px-3 py-1 rounded" (click)="clearAll()">Clear</button>
+          </div>
+          <div class="grid grid-cols-2 gap-2 items-center">
+            <label class="text-slate-600">Thickness (mm)</label>
+            <input type="number" class="rounded px-2 py-1" [(ngModel)]="wallThickness" />
+            <label class="text-slate-600">Wall height (mm)</label>
+            <input type="number" class="rounded px-2 py-1" [(ngModel)]="wallHeight" />
+            <label class="text-slate-600">Opening width (mm)</label>
+            <input type="number" class="rounded px-2 py-1" [(ngModel)]="openingWidth" />
           </div>
           <label class="inline-flex items-center gap-2"><input type="checkbox" [(ngModel)]="snap"> Snap to grid</label>
         </div>
@@ -135,7 +136,7 @@
       </div>
 
       <!-- Left-center zoom tools -->
-      <div class=" bg-white/90 dark:bg-slate-900/70 rounded-lg p-2 shadow-lg flex flex-col gap-2 text-sm">
+      <div class=" bg-white/90 dark:bg-slate-900/70 rounded-lg p-2 shadow-lg flex flex-col gap-2 text-sm z-10">
         <button class="px-2 py-1 rounded material-symbols-outlined cursor-pointer" (click)="zoom(1/1.1)">add</button>
         <button class="px-2 py-1 rounded material-symbols-outlined cursor-pointer" (click)="zoom(1.1)">remove</button>
         <button class="px-2 py-1 rounded material-symbols-outlined cursor-pointer"
@@ -144,7 +145,7 @@
     </div>
 
     <!-- Center viewport -->
-    <div #actualViewPort class="absolute w-screen h-full inset-0 z-[-1] overflow-hidden">
+    <div #actualViewPort class="absolute w-screen h-full inset-0 z-0 overflow-hidden">
       <!-- 2D Viewport -->
       <div *ngIf="viewPort==='2d'; else threeD" #view2d class="h-full w-full overflow-hidden">
         <div class="relative h-full w-full" #pane (mousedown)="onMouseDown($event)" (mousemove)="onMouseMove($event)"
@@ -156,14 +157,37 @@
               </pattern>
             </defs>
             <rect [attr.x]="minX" [attr.y]="minY" [attr.width]="width" [attr.height]="height" fill="url(#grid)" />
-            <g stroke="#111827" stroke-width="4" fill="none">
-              <polyline *ngFor="let w of walls" [attr.points]="pointsAttr(w.points)" />
+            <!-- Rooms -->
+            <g>
+              <rect *ngFor="let r of rooms"
+                    [attr.x]="r.x" [attr.y]="r.y" [attr.width]="r.w" [attr.height]="r.h"
+                    fill="#e0f2fe" fill-opacity="0.35" stroke="#0ea5e9" stroke-width="2" />
+              <g *ngFor="let r of rooms" fill="#0ea5e9">
+                <circle [attr.cx]="r.x" [attr.cy]="r.y" r="8" />
+                <circle [attr.cx]="r.x+r.w" [attr.cy]="r.y" r="8" />
+                <circle [attr.cx]="r.x" [attr.cy]="r.y+r.h" r="8" />
+                <circle [attr.cx]="r.x+r.w" [attr.cy]="r.y+r.h" r="8" />
+              </g>
             </g>
-            <polyline *ngIf="creating" [attr.points]="pointsAttr(current)" stroke="#2563eb" stroke-width="3"
-              fill="none" />
-            <g *ngIf="creating && current.length>1" font-size="12" fill="#111827">
-              <text [attr.x]="current[current.length-1].x+8"
-                [attr.y]="current[current.length-1].y-8">{{lastSegmentLength()}} mm</text>
+            <!-- Walls and openings -->
+            <g stroke="#111827" stroke-linecap="butt" fill="none">
+              <g *ngFor="let w of walls">
+                <line [attr.x1]="w.a.x" [attr.y1]="w.a.y" [attr.x2]="w.b.x" [attr.y2]="w.b.y" [attr.stroke-width]="w.thickness" />
+                <circle [attr.cx]="w.a.x" [attr.cy]="w.a.y" r="10" fill="#1d4ed8" />
+                <circle [attr.cx]="w.b.x" [attr.cy]="w.b.y" r="10" fill="#1d4ed8" />
+                <g *ngFor="let o of w.openings">
+                  <line [attr.x1]="w.a.x + (w.b.x-w.a.x)*(o.offset - o.width/2)/ (Math.hypot(w.b.x-w.a.x,w.b.y-w.a.y))"
+                        [attr.y1]="w.a.y + (w.b.y-w.a.y)*(o.offset - o.width/2)/ (Math.hypot(w.b.x-w.a.x,w.b.y-w.a.y))"
+                        [attr.x2]="w.a.x + (w.b.x-w.a.x)*(o.offset + o.width/2)/ (Math.hypot(w.b.x-w.a.x,w.b.y-w.a.y))"
+                        [attr.y2]="w.a.y + (w.b.y-w.a.y)*(o.offset + o.width/2)/ (Math.hypot(w.b.x-w.a.x,w.b.y-w.a.y))"
+                        [attr.stroke-width]="w.thickness+6" stroke="#ffffff" stroke-linecap="butt" />
+                </g>
+              </g>
+            </g>
+            <!-- Draft preview -->
+            <g *ngIf="creating && draftA && draftB">
+              <line *ngIf="mode==='wall'" [attr.x1]="draftA.x" [attr.y1]="draftA.y" [attr.x2]="draftB.x" [attr.y2]="draftB.y" stroke="#2563eb" [attr.stroke-width]="wallThickness" stroke-opacity="0.4" />
+              <rect *ngIf="mode==='room'" [attr.x]="Math.min(draftA.x,draftB.x)" [attr.y]="Math.min(draftA.y,draftB.y)" [attr.width]="Math.abs(draftA.x-draftB.x)" [attr.height]="Math.abs(draftA.y-draftB.y)" stroke="#2563eb" stroke-width="2" fill="#93c5fd" fill-opacity="0.3" />
             </g>
           </svg>
         </div>
@@ -179,7 +203,7 @@
 
     <!-- Right floating controls -->
     <div #rightSidebar
-      class="absolute top-5 right-5 flex items-start justify-start max-h-screen w-auto overflow-hidden gap-3">
+      class="absolute top-5 right-5 z-10 flex items-start justify-start max-h-screen w-auto overflow-hidden gap-3">
       <div #visuals
         class="h-auto overflow-hidden bg-white/90 dark:bg-slate-900/70 p-3 rounded-lg overflow-x-hidden overflow-y-auto flex flex-col gap-2 shadow-lg text-sm">
         <div class="font-semibold">Visual</div>
