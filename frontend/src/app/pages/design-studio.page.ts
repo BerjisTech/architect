@@ -4,6 +4,7 @@ import { FormsModule } from '@angular/forms';
 import { StudioService } from '../services/studio.service';
 import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 import { Subscription } from 'rxjs';
+import { CoreAuthService, CoreAuthSession } from '@berjis/angular-auth';
 
 type Point = { x: number; y: number };
 type Opening = { id: string; kind: 'door'|'window'; offset: number; width: number };
@@ -67,12 +68,17 @@ export class DesignStudioPage implements OnInit, OnDestroy {
   statusMessage = '';
   loadingPlan = false;
 
+  private authUnsub?: () => void;
+  private userUuid: string | null = null;
+
   private qpSub?: Subscription;
   private statusTimer: ReturnType<typeof setTimeout> | null = null;
 
   title = 'Architect';
   isDark = false;
   ngOnInit(): void {
+    this.authUnsub = this.auth.onSessionChange((session: CoreAuthSession) => this.applySession(session));
+    void this.auth.ensureAuth({ maxAgeMs: 1500 }).catch(err => console.warn("ensureAuth failed", err));
     const persisted = (localStorage.getItem('theme') || '').toLowerCase();
     const preferDark = persisted === 'dark';
     this.setTheme(preferDark ? 'dark' : 'light');
@@ -92,7 +98,22 @@ export class DesignStudioPage implements OnInit, OnDestroy {
       }
     });
   }
+
+  private applySession(session: CoreAuthSession) {
+    if (session && session.valid) {
+      const profile = (session.profile || {}) as Record<string, unknown>;
+      const candidate =
+        session.uuid ||
+        (typeof profile['uuid'] === 'string' ? profile['uuid'] : undefined) ||
+        (typeof profile['id'] === 'string' ? profile['id'] : undefined);
+      this.userUuid = candidate ? String(candidate) : null;
+    } else {
+      this.userUuid = null;
+    }
+  }
+
   ngOnDestroy(): void {
+    this.authUnsub?.();
     this.qpSub?.unsubscribe();
     if (this.statusTimer) {
       clearTimeout(this.statusTimer);
@@ -462,6 +483,7 @@ export class DesignStudioPage implements OnInit, OnDestroy {
   private dist(a:Point,b:Point){ const dx=b.x-a.x, dy=b.y-a.y; return Math.hypot(dx,dy); }
 
   constructor(
+    private auth: CoreAuthService,
     private studio: StudioService,
     private router: Router,
     private route: ActivatedRoute
@@ -528,7 +550,7 @@ export class DesignStudioPage implements OnInit, OnDestroy {
     try {
       const payload = this.serialize();
       if (!this.planId) {
-        const id = await this.studio.create(trimmed, payload);
+        const id = await this.studio.create(trimmed, payload, this.userUuid || undefined);
         this.planId = id;
         await this.updateQuery({ plan: id, new: null });
       } else {

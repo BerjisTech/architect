@@ -3,12 +3,17 @@ package server
 import (
 	"database/sql"
 	"encoding/json"
+	"log"
+	"net/http"
 	"strings"
 	"time"
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/gofiber/fiber/v2/middleware/cors"
 	"github.com/jmoiron/sqlx"
+
+	"github.com/berjistech/berjis-ecosystem/architect/service/internal/auth"
+	coreauth "github.com/berjistech/berjis-ecosystem/shared/coreauth"
 )
 
 type Options struct {
@@ -23,7 +28,7 @@ func New(opts Options) *fiber.App {
 	app.Use(cors.New(cors.Config{
 		AllowOrigins:     opts.AllowedOrigins,
 		AllowMethods:     "GET,POST,PUT,PATCH,DELETE,OPTIONS",
-		AllowHeaders:     "Authorization,Content-Type,Accept",
+		AllowHeaders:     "Authorization,Content-Type,Accept,X-User-UUID,X-User-Roles",
 		AllowCredentials: true,
 	}))
 
@@ -31,7 +36,29 @@ func New(opts Options) *fiber.App {
 		return c.JSON(fiber.Map{"success": true, "message": "ok"})
 	})
 
-	// Floorplans CRUD (minimal authless draft endpoints)
+	httpClient := &http.Client{Timeout: 8 * time.Second}
+	var authVerifier *coreauth.Verifier
+	if base := strings.TrimSpace(opts.CoreAPIBase); base != "" {
+		if v, err := coreauth.NewVerifier(coreauth.Config{
+			CoreAPIBase: base,
+			HTTPClient:  httpClient,
+		}); err != nil {
+			log.Printf("warn: coreauth verifier init failed: %v", err)
+		} else {
+			authVerifier = v
+		}
+	}
+
+	requireAuth := auth.Middleware(auth.Options{
+		CoreAPIBase: opts.CoreAPIBase,
+		Env:         opts.Env,
+		HTTPClient:  httpClient,
+		Verifier:    authVerifier,
+	})
+
+	protected := app.Group("/v1", requireAuth)
+
+	// Floorplans CRUD
 	type floorplan struct {
 		ID          string          `db:"id" json:"id"`
 		Name        string          `db:"name" json:"name"`
@@ -40,7 +67,7 @@ func New(opts Options) *fiber.App {
 		UpdatedAt   time.Time       `db:"updated_at" json:"updatedAt"`
 	}
 
-	app.Post("/v1/floorplans", func(c *fiber.Ctx) error {
+	protected.Post("/floorplans", func(c *fiber.Ctx) error {
 		var in struct {
 			Name        string          `json:"name"`
 			Data        json.RawMessage `json:"data"`
@@ -57,7 +84,7 @@ func New(opts Options) *fiber.App {
 		return c.JSON(fiber.Map{"success": true, "data": fiber.Map{"id": id}})
 	})
 
-	app.Put("/v1/floorplans/:id", func(c *fiber.Ctx) error {
+	protected.Put("/floorplans/:id", func(c *fiber.Ctx) error {
 		id := c.Params("id")
 		var in struct {
 			Name *string          `json:"name"`
@@ -76,7 +103,7 @@ func New(opts Options) *fiber.App {
 		return c.JSON(fiber.Map{"success": true})
 	})
 
-	app.Get("/v1/floorplans/:id", func(c *fiber.Ctx) error {
+	protected.Get("/floorplans/:id", func(c *fiber.Ctx) error {
 		id := c.Params("id")
 		var row floorplan
 		err := opts.DB.Get(&row, `SELECT id,name,owner_user_id,data,updated_at FROM floorplans WHERE id=$1`, id)
@@ -89,7 +116,7 @@ func New(opts Options) *fiber.App {
 		return c.JSON(fiber.Map{"success": true, "data": row})
 	})
 
-	app.Get("/v1/floorplans", func(c *fiber.Ctx) error {
+	protected.Get("/floorplans", func(c *fiber.Ctx) error {
 		owner := strings.TrimSpace(c.Query("ownerUserId"))
 		const limit = 100
 		var rows []floorplan
