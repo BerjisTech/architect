@@ -20,29 +20,58 @@
             "outputPath": "dist/architect",
             "index": "src/index.html",
             "browser": "src/main.ts",
-            "polyfills": ["zone.js"],
+            "polyfills": [
+              "zone.js"
+            ],
             "tsConfig": "tsconfig.app.json",
             "inlineStyleLanguage": "css",
             "preserveSymlinks": true,
             "assets": [
-              { "glob": "manifest.webmanifest", "input": "src", "output": "/" },
-              { "glob": "**/*", "input": "public" },
-              { "glob": "**/*", "input": ".well-known", "output": "/.well-known" }
+              {
+                "glob": "manifest.webmanifest",
+                "input": "src",
+                "output": "/"
+              },
+              {
+                "glob": "**/*",
+                "input": "public"
+              },
+              {
+                "glob": "**/*",
+                "input": ".well-known",
+                "output": "/.well-known"
+              }
             ],
-            "styles": ["src/styles.css"],
+            "styles": [
+              "src/styles.css"
+            ],
             "scripts": []
           },
           "configurations": {
             "production": {
               "fileReplacements": [
-                { "replace": "src/environments/environment.ts", "with": "src/environments/environment.prod.ts" }
+                {
+                  "replace": "src/environments/environment.ts",
+                  "with": "src/environments/environment.prod.ts"
+                }
               ],
               "budgets": [
-                { "type": "initial", "maximumWarning": "3MB", "maximumError": "500MB" },
-                { "type": "anyComponentStyle", "maximumWarning": "4kB", "maximumError": "8kB" }
+                {
+                  "type": "initial",
+                  "maximumWarning": "3MB",
+                  "maximumError": "500MB"
+                },
+                {
+                  "type": "anyComponentStyle",
+                  "maximumWarning": "4kB",
+                  "maximumError": "8kB"
+                }
               ],
               "outputHashing": "all",
-              "optimization": { "scripts": true, "styles": true },
+              "optimization": {
+                "scripts": true,
+                "styles": true
+              },
               "sourceMap": false,
               "namedChunks": false,
               "extractLicenses": true
@@ -58,16 +87,39 @@
         "serve": {
           "builder": "@angular-devkit/build-angular:dev-server",
           "configurations": {
-            "production": { "buildTarget": "architect:build:production" },
-            "development": { "buildTarget": "architect:build:development" }
+            "production": {
+              "buildTarget": "architect:build:production"
+            },
+            "development": {
+              "buildTarget": "architect:build:development"
+            }
           },
           "defaultConfiguration": "development"
         },
-        "extract-i18n": { "builder": "@angular-devkit/build-angular:extract-i18n" }
+        "extract-i18n": {
+          "builder": "@angular-devkit/build-angular:extract-i18n"
+        },
+        "lint": {
+          "builder": "@angular-eslint/builder:lint",
+          "options": {
+            "lintFilePatterns": [
+              "src/**/*.ts",
+              "src/**/*.html"
+            ]
+          }
+        }
       }
     }
   },
-  "cli": { "analytics": false },
-  "schematics": { "@schematics/angular:component": { "type": "component" } }
+  "cli": {
+    "analytics": false,
+    "schematicCollections": [
+      "angular-eslint"
+    ]
+  },
+  "schematics": {
+    "@schematics/angular:component": {
+      "type": "component"
+    }
+  }
 }
-

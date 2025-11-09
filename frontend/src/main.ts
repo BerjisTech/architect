@@ -8,6 +8,7 @@ import { MatchingPage } from './app/pages/matching.page';
 import { ConsultationPage } from './app/pages/consultation.page';
 import { ChecklistPage } from './app/pages/checklist.page';
 import { DesignStudioPage } from './app/pages/design-studio.page';
+import { PlansPage } from './app/pages/plans.page';
 
 const routes: Routes = [
   { path: '', component: HomePage, title: 'Architect – Home' },
@@ -16,6 +17,7 @@ const routes: Routes = [
   { path: 'matching', component: MatchingPage, title: 'Professional Matching' },
   { path: 'consultation', component: ConsultationPage, title: 'Consultation' },
   { path: 'regulatory-checklist', component: ChecklistPage, title: 'Regulatory Checklist' },
+  { path: 'plans', component: PlansPage, title: 'Plans' },
   { path: 'studio', component: DesignStudioPage, title: 'Design Studio' },
 ];
 

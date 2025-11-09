@@ -7,6 +7,7 @@
       <a routerLink="/matching" class="text-sm text-slate-600 hover:text-slate-900">Matching</a>
       <a routerLink="/consultation" class="text-sm text-slate-600 hover:text-slate-900">Consultation</a>
       <a routerLink="/regulatory-checklist" class="text-sm text-slate-600 hover:text-slate-900">Checklist</a>
+      <a routerLink="/plans" class="text-sm text-slate-600 hover:text-slate-900">Plans</a>
       <a routerLink="/studio" class="text-sm text-slate-600 hover:text-slate-900">Studio</a>
       <span class="ml-auto text-xs text-slate-500"><a href="/api/v1/health" class="underline">Core API</a> · <a
           href="/svc/v1/health" class="underline">Service</a></span>
@@ -61,18 +62,39 @@
         class="max-h-full w-[320px] backdrop-blur-md bg-white/90 dark:bg-slate-900/70 p-3 rounded-lg overflow-x-hidden overflow-y-auto shadow-lg">
         <!-- PROJECT -->
         <div *ngIf="toolset==='project'" class="space-y-3 text-sm">
-          <div class="font-semibold text-slate-900 dark:text-white">Project</div>
+          <div class="flex items-center justify-between gap-2">
+            <div class="font-semibold text-slate-900 dark:text-white">Project</div>
+            <span *ngIf="planId" class="text-xs text-slate-500 dark:text-slate-300">Plan ID: {{ planId }}</span>
+          </div>
           <label class="grid gap-1">
             <span class="text-slate-600">Plan name</span>
-            <input class="rounded px-2 py-1" [(ngModel)]="name" />
+            <input class="rounded px-2 py-1" [(ngModel)]="name" placeholder="e.g. Riverside bungalow" />
           </label>
-          <div class="w-full flex flex-col items-start justify-start gap-1">
-            <input class="w-full rounded px-2 py-1 col-span-2" placeholder="Load ID" [(ngModel)]="loadId" />
-            <button class="w-full btn-ghost" (click)="loadById()" [disabled]="!loadId">Load</button>
-            <button class="w-full btn-primary" (click)="save()" [disabled]="!name">Save</button>
+          <div class="flex flex-col gap-2">
+            <button type="button" class="btn-primary" (click)="save()"
+                    [disabled]="saveState==='saving' || !name.trim() || loadingPlan">
+              <span *ngIf="saveState!=='saving'">{{ planId ? 'Save changes' : 'Save plan' }}</span>
+              <span *ngIf="saveState==='saving'">Saving...</span>
+            </button>
+            <button type="button" class="btn-ghost" (click)="openPlans()">Open plan library</button>
           </div>
-          <div class="text-xs text-slate-600">Scale: 1:{{scale | number:'1.0-2'}} · Walls: {{walls.length}}</div>
-          <div *ngIf="creating" class="text-xs text-blue-700">Drawing wall: click to add points, Finish to end.</div>
+          <div *ngIf="loadingPlan" class="text-xs text-blue-700 dark:text-blue-200">Loading plan…</div>
+          <div *ngIf="statusMessage" class="text-xs"
+               [ngClass]="{
+                 'text-blue-700 dark:text-blue-200': saveState==='saving',
+                 'text-emerald-600 dark:text-emerald-300': saveState==='success',
+                 'text-rose-600 dark:text-rose-300': saveState==='error',
+                 'text-slate-600 dark:text-slate-300': saveState==='idle'
+               }">
+            {{ statusMessage }}
+          </div>
+          <div class="text-xs text-slate-600 dark:text-slate-300">Scale: 1:{{scale | number:'1.0-2'}} · Walls: {{walls.length}}</div>
+          <div *ngIf="creating && mode==='wall'" class="text-xs text-blue-700 dark:text-blue-200">
+            Wall tool active: click to add points, double-click to finish.
+          </div>
+          <div *ngIf="creating && mode==='room'" class="text-xs text-blue-700 dark:text-blue-200">
+            Room tool active: drag to size the room, release to place.
+          </div>
         </div>
 
         <!-- BUILD -->
@@ -150,7 +172,7 @@
       <div *ngIf="viewPort==='2d'; else threeD" #view2d class="h-full w-full overflow-hidden">
         <div class="relative h-full w-full" #pane (mousedown)="onMouseDown($event)" (mousemove)="onMouseMove($event)"
           (mouseup)="onMouseUp()" (mouseleave)="onMouseUp()" (wheel)="onWheel($event)">
-          <svg class="w-full h-full block" [attr.viewBox]="viewBox()" (click)="onSvgClick($event)">
+          <svg class="w-full h-full block" [attr.viewBox]="viewBox()" (click)="onSvgClick($event)" (dblclick)="onSvgDoubleClick($event)">
             <defs>
               <pattern id="grid" x="0" y="0" width="50" height="50" patternUnits="userSpaceOnUse">
                 <path d="M 50 0 L 0 0 0 50" fill="none" stroke="#e5e7eb" stroke-width="1" />
@@ -172,9 +194,9 @@
             <!-- Walls and openings -->
             <g stroke="#111827" stroke-linecap="butt" fill="none">
               <g *ngFor="let w of walls">
-                <line [attr.x1]="w.a.x" [attr.y1]="w.a.y" [attr.x2]="w.b.x" [attr.y2]="w.b.y" [attr.stroke-width]="w.thickness" />
-                <circle [attr.cx]="w.a.x" [attr.cy]="w.a.y" r="10" fill="#1d4ed8" />
-                <circle [attr.cx]="w.b.x" [attr.cy]="w.b.y" r="10" fill="#1d4ed8" />
+                <line [attr.x1]="w.a.x" [attr.y1]="w.a.y" [attr.x2]="w.b.x" [attr.y2]="w.b.y" [attr.stroke-width]="w.thickness"
+                      [attr.stroke]="selectedWallId===w.id ? '#2563eb' : '#111827'"
+                      [attr.stroke-opacity]="selectedWallId===w.id ? 0.85 : 1" />
                 <g *ngFor="let o of w.openings">
                   <line [attr.x1]="w.a.x + (w.b.x-w.a.x)*(o.offset - o.width/2)/ (Math.hypot(w.b.x-w.a.x,w.b.y-w.a.y))"
                         [attr.y1]="w.a.y + (w.b.y-w.a.y)*(o.offset - o.width/2)/ (Math.hypot(w.b.x-w.a.x,w.b.y-w.a.y))"
@@ -184,12 +206,50 @@
                 </g>
               </g>
             </g>
+            <g fill="#1d4ed8">
+              <circle *ngFor="let node of wallHandlesList" [attr.cx]="node.point.x" [attr.cy]="node.point.y" r="10" />
+            </g>
             <!-- Draft preview -->
             <g *ngIf="creating && draftA && draftB">
               <line *ngIf="mode==='wall'" [attr.x1]="draftA.x" [attr.y1]="draftA.y" [attr.x2]="draftB.x" [attr.y2]="draftB.y" stroke="#2563eb" [attr.stroke-width]="wallThickness" stroke-opacity="0.4" />
               <rect *ngIf="mode==='room'" [attr.x]="Math.min(draftA.x,draftB.x)" [attr.y]="Math.min(draftA.y,draftB.y)" [attr.width]="Math.abs(draftA.x-draftB.x)" [attr.height]="Math.abs(draftA.y-draftB.y)" stroke="#2563eb" stroke-width="2" fill="#93c5fd" fill-opacity="0.3" />
             </g>
           </svg>
+          <div *ngIf="selectedWallId && selectedWallPoint && selectedWall as wall"
+               class="absolute z-20 pointer-events-none"
+               [ngStyle]="wallTooltipStyle()"
+               style="transform: translate(-50%, -110%);">
+            <div class="pointer-events-auto w-[280px] rounded-xl border border-slate-200/70 bg-white/95 p-3 text-xs shadow-lg backdrop-blur dark:border-slate-700/60 dark:bg-slate-900/90 dark:text-slate-200 space-y-3">
+              <div class="flex items-center justify-between">
+                <span class="font-semibold text-slate-900 dark:text-white">Wall tools</span>
+                <button type="button" class="material-symbols-outlined text-xs text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-white"
+                        (click)="selectedWallId=null; selectedWallPoint=null; selectedWallT=null">close</button>
+              </div>
+              <div class="flex items-center justify-between">
+                <span>Length</span>
+                <span class="font-semibold text-slate-900 dark:text-white">{{ formatLength(wallLengthMm(wall)) }}</span>
+              </div>
+              <div class="grid grid-cols-2 gap-2">
+                <button type="button" class="btn-ghost px-2 py-1 text-left" (click)="adjustSelectedWall('start', lengthDelta)">Extend start +</button>
+                <button type="button" class="btn-ghost px-2 py-1 text-left" (click)="adjustSelectedWall('start', -lengthDelta)">Shrink start -</button>
+                <button type="button" class="btn-ghost px-2 py-1 text-left" (click)="adjustSelectedWall('end', lengthDelta)">Extend end +</button>
+                <button type="button" class="btn-ghost px-2 py-1 text-left" (click)="adjustSelectedWall('end', -lengthDelta)">Shrink end -</button>
+                <button type="button" class="btn-ghost px-2 py-1 text-left" (click)="adjustSelectedWall('both', lengthDelta)">Extend both +</button>
+                <button type="button" class="btn-ghost px-2 py-1 text-left" (click)="adjustSelectedWall('both', -lengthDelta)">Shrink both -</button>
+              </div>
+              <label class="flex items-center justify-between gap-2">
+                <span>Step (mm)</span>
+                <input type="number" class="w-20 rounded border border-slate-200 px-2 py-1 dark:border-slate-700 dark:bg-slate-800"
+                       [ngModel]="lengthDelta" (ngModelChange)="lengthDelta = Math.max(10, +$event || 10)" min="10" step="10" />
+              </label>
+              <div class="grid grid-cols-2 gap-2">
+                <button type="button" class="btn-ghost px-2 py-1 text-left" (click)="branchFromSelectedWall()">Branch from here</button>
+                <button type="button" class="btn-ghost px-2 py-1 text-left" (click)="splitSelectedWall()">Split at point</button>
+                <button type="button" class="btn-ghost px-2 py-1 text-left" (click)="curveSelectedWall()">Curve (add midpoint)</button>
+                <button type="button" class="btn-ghost px-2 py-1 text-left text-rose-600 hover:text-rose-800" (click)="deleteSelectedWall()">Delete wall</button>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
       <!-- 3D Viewport placeholder -->
