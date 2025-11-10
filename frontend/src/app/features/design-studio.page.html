@@ -325,11 +325,13 @@
           </div>
         </div>
       </div>
-      <!-- 3D Viewport placeholder -->
       <ng-template #threeD>
         <div #view3d
-          class="h-full w-full overflow-hidden flex items-center justify-center bg-slate-50 dark:bg-slate-900 text-slate-500">
-          3D Viewport (camera tools control type, FOV, height)
+          class="relative h-full w-full overflow-hidden bg-slate-50 dark:bg-slate-900">
+          <canvas #canvas3d class="arch-3d block h-full w-full"></canvas>
+          <div class="pointer-events-none absolute left-4 top-4 rounded-lg border border-slate-200/70 bg-white/80 px-3 py-2 text-xs text-slate-600 shadow dark:border-slate-700 dark:bg-slate-900/80 dark:text-slate-300">
+            3D preview · auto orbit · switch back to 2D for precision.
+          </div>
         </div>
       </ng-template>
     </div>

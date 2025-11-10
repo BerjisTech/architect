@@ -181,7 +181,7 @@ Build a comprehensive real estate and construction platform at architect.berjis.
   - **Recommended: SVG for 2D** (better for precision, manipulation, and element selection)
   - **WebGL for 3D** (Three.js recommended for performance and features)
   - HTML5 Canvas as fallback for performance-critical operations
-- [ ] Implement dual-viewport system (2D and 3D synchronized views)
+  - [x] Implement dual-viewport system (2D and 3D synchronized views)
 - [x] Create coordinate system with origin point
 - [x] Implement grid system with:
   - [x] Snap-to-grid toggle
@@ -664,7 +664,7 @@ Build a comprehensive real estate and construction platform at architect.berjis.
   - Synchronized viewport option (changes in one reflect in other)
 - [ ] Create dual-viewport modes:
   - Side-by-side 2D and 3D view
-  - Tabbed view (switch between 2D and 3D)
+    - [x] Tabbed view (switch between 2D and 3D)
   - Picture-in-picture (small 3D preview while editing 2D)
   - Full-screen 3D mode
 

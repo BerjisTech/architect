@@ -15,7 +15,7 @@ type Room = { id: string; x: number; y: number; w: number; h: number; height: nu
 type WallDragAnchor = { wall: Wall; end: 'a'|'b'; point: Point };
 type MeasurementSegment = { id: string; a: Point; b: Point; length: number };
 type WallFace = { id: string; corners: [Point, Point, Point, Point]; wallId: string };
-type RoomMesh = { id: string; faces: Array<[Point, Point, Point, Point]> };
+type RoomMesh = { id: string; faces: [Point, Point, Point, Point][] };
 
 @Component({
   selector: 'arch-design-studio',
@@ -25,10 +25,25 @@ type RoomMesh = { id: string; faces: Array<[Point, Point, Point, Point]> };
 })
 export class DesignStudioPage implements OnInit, OnDestroy {
   @ViewChild('pane') pane?: ElementRef<HTMLDivElement>;
+  @ViewChild('canvas3d') canvas3d?: ElementRef<HTMLCanvasElement>;
 
   // UI state
   toolset: 'project'|'build'|'info'|'objects'|'styleboards'|'finishes'|'exports'|'help' = 'project';
-  viewPort: '2d'|'3d' = '2d';
+  private _viewPort: '2d'|'3d' = '2d';
+  get viewPort(): '2d'|'3d' { return this._viewPort; }
+  set viewPort(value: '2d'|'3d') {
+    if (this._viewPort === value) {
+      return;
+    }
+    this._viewPort = value;
+    if (value === '3d') {
+      this.lastFrame = performance.now();
+      this.scheduleFrame();
+    } else if (this.animationId !== null) {
+      cancelAnimationFrame(this.animationId);
+      this.animationId = null;
+    }
+  }
   units: 'm'|'ft' = 'm';
   lockConstruction = false;
   lockLabels = false;
@@ -141,6 +156,10 @@ export class DesignStudioPage implements OnInit, OnDestroy {
       clearTimeout(this.statusTimer);
       this.statusTimer = null;
     }
+    if (this.animationId !== null) {
+      cancelAnimationFrame(this.animationId);
+      this.animationId = null;
+    }
   }
   toggleTheme() { this.setTheme(this.isDark ? 'light' : 'dark'); }
   private setTheme(mode: 'light' | 'dark') {
@@ -162,6 +181,8 @@ export class DesignStudioPage implements OnInit, OnDestroy {
     this.selectedWallT=null;
     this.selectedRoomId=null;
     this.dragging=null;
+    this.roomMeshes = [];
+    this.wallFaces = [];
   }
 
   // Pointer events
@@ -184,6 +205,9 @@ export class DesignStudioPage implements OnInit, OnDestroy {
         }
         this.measureStart = null;
         this.measureDraft = null;
+      }
+      if (this.viewPort === '3d') {
+        this.scheduleFrame();
       }
       return;
     }
@@ -278,6 +302,9 @@ export class DesignStudioPage implements OnInit, OnDestroy {
     if(this.mode==='measure'){
       if(this.measureStart){
         this.measureDraft = this.resolveGenericPoint(raw);
+        if (this.viewPort === '3d') {
+          this.scheduleFrame();
+        }
       }
       return;
     }
@@ -463,6 +490,7 @@ export class DesignStudioPage implements OnInit, OnDestroy {
   }
 
   private finishWallDrawing(): void {
+    this.rebuildMeshes();
     this.creating = false;
     this.draftA = null;
     this.draftB = null;
@@ -477,6 +505,7 @@ export class DesignStudioPage implements OnInit, OnDestroy {
     const h = Math.abs(this.draftA.y - this.draftB.y);
     if(w>0 && h>0){
       this.rooms.push({ id:this.uid(), x, y, w, h, height:3000 });
+      this.rebuildMeshes();
     }
     this.creating = false;
     this.draftA = null;
@@ -495,6 +524,7 @@ export class DesignStudioPage implements OnInit, OnDestroy {
     this.wallPath.push(tail);
     this.draftA = tail;
     this.draftB = tail;
+    this.rebuildMeshes();
   }
 
   private paneElement(): HTMLDivElement | null {
@@ -675,11 +705,15 @@ export class DesignStudioPage implements OnInit, OnDestroy {
       point.x = to.x;
       point.y = to.y;
     }
+    if (this.viewPort === '3d') {
+      this.rebuildMeshes();
+    }
   }
   private replaceWallWithSegments(originalId: string, segments: Wall[]){
     const idx = this.walls.findIndex(w=>w.id===originalId);
     if(idx===-1) return;
     this.walls.splice(idx, 1, ...segments);
+    this.rebuildMeshes();
   }
   private ensureNodeAtSelection(): { point: Point; created: boolean } | null {
     const wall = this.selectedWall;
@@ -805,6 +839,7 @@ export class DesignStudioPage implements OnInit, OnDestroy {
     this.updateGridSpacing(g.spacing ?? this.gridSpacing);
     this.updateGridMajorEvery(g.majorEvery ?? this.gridMajorEvery);
     this.updateGridOpacity(g.opacity ?? this.gridOpacity);
+    this.rebuildMeshes();
   }
 
   private beginNewPlan(): void {
@@ -819,6 +854,7 @@ export class DesignStudioPage implements OnInit, OnDestroy {
     this.measureStart = null;
     this.measureDraft = null;
     this.measurements = [];
+    this.rebuildMeshes();
     this.setSaveState('idle', 'New plan ready');
   }
 
@@ -1022,6 +1058,7 @@ export class DesignStudioPage implements OnInit, OnDestroy {
     this.selectedWallPoint = null;
     this.selectedWallT = null;
     this.setSaveState('idle', 'Wall removed.');
+    this.rebuildMeshes();
   }
 
   toggleMeasureMode(force?: boolean): void {
@@ -1040,6 +1077,9 @@ export class DesignStudioPage implements OnInit, OnDestroy {
       this.measureDraft = null;
       this.setSaveState('idle', 'Measurement mode off.');
     }
+    if (this.viewPort === '3d') {
+      this.scheduleFrame();
+    }
   }
 
   clearMeasurements(): void {
@@ -1047,7 +1087,332 @@ export class DesignStudioPage implements OnInit, OnDestroy {
       return;
     }
     this.measurements = [];
+    if (this.viewPort === '3d') {
+      this.scheduleFrame();
+    }
     this.setSaveState('idle', 'Measurements cleared.');
+  }
+
+  private rebuildMeshes(): void {
+    const wallFaces: WallFace[] = [];
+    for (const wall of this.walls) {
+      const dir = this.unitVector(wall.a, wall.b);
+      const normal = { x: -dir.y, y: dir.x };
+      const half = wall.thickness / 2;
+      const c1 = { x: wall.a.x + normal.x * half, y: wall.a.y + normal.y * half };
+      const c2 = { x: wall.b.x + normal.x * half, y: wall.b.y + normal.y * half };
+      const c3 = { x: wall.b.x - normal.x * half, y: wall.b.y - normal.y * half };
+      const c4 = { x: wall.a.x - normal.x * half, y: wall.a.y - normal.y * half };
+      wallFaces.push({ id: wall.id, wallId: wall.id, corners: [c1, c2, c3, c4] });
+    }
+    const roomMeshes: RoomMesh[] = this.rooms.map(room => ({
+      id: room.id,
+      faces: [[
+        { x: room.x, y: room.y },
+        { x: room.x + room.w, y: room.y },
+        { x: room.x + room.w, y: room.y + room.h },
+        { x: room.x, y: room.y + room.h }
+      ]]
+    }));
+    this.wallFaces = wallFaces;
+    this.roomMeshes = roomMeshes;
+    if (this.viewPort === '3d') {
+      this.scheduleFrame();
+    }
+  }
+
+  private scheduleFrame(): void {
+    if (this.viewPort !== '3d') {
+      return;
+    }
+    if (this.animationId !== null) {
+      return;
+    }
+    this.animationId = requestAnimationFrame(ts => this.renderFrame(ts));
+  }
+
+  private renderFrame(ts: number): void {
+    this.animationId = null;
+    if (this.viewPort !== '3d') {
+      return;
+    }
+    const canvas = this.canvas3d?.nativeElement;
+    if (!canvas) {
+      this.animationId = requestAnimationFrame(next => this.renderFrame(next));
+      return;
+    }
+    const width = canvas.clientWidth || canvas.width;
+    const height = canvas.clientHeight || canvas.height;
+    if (!width || !height) {
+      this.animationId = requestAnimationFrame(next => this.renderFrame(next));
+      return;
+    }
+    if (canvas.width !== width || canvas.height !== height) {
+      canvas.width = width;
+      canvas.height = height;
+    }
+    const ctx = canvas.getContext('2d');
+    if (!ctx) {
+      return;
+    }
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.clearRect(0, 0, width, height);
+    ctx.fillStyle = this.isDark ? '#020617' : '#f8fafc';
+    ctx.fillRect(0, 0, width, height);
+
+    const delta = this.lastFrame ? ts - this.lastFrame : 16;
+    this.lastFrame = ts;
+    if (Number.isFinite(delta)) {
+      this.cam.yaw += delta * 0.00012;
+    }
+
+    const camPos = this.computeCameraPosition();
+    const center = this.computeSceneCenter();
+    const view = this.lookAt(camPos, center, { x: 0, y: 0, z: 1 });
+    const proj = this.perspectiveMatrix(Math.PI / 3, width / height, 200, 40000);
+    const matrix = this.multiplyMatrices(proj, view);
+
+    for (const mesh of this.roomMeshes) {
+      this.drawRoomMesh(ctx, matrix, mesh, width, height);
+    }
+    for (const face of this.wallFaces) {
+      this.drawWallFace(ctx, matrix, face, width, height);
+    }
+    if (this.measureStart && this.measureDraft) {
+      this.drawMeasurement3d(ctx, matrix, {
+        id: 'draft',
+        a: this.measureStart,
+        b: this.measureDraft,
+        length: this.segLen(this.measureStart, this.measureDraft)
+      }, width, height, true);
+    }
+    for (const measurement of this.measurements) {
+      this.drawMeasurement3d(ctx, matrix, measurement, width, height, false);
+    }
+    this.animationId = requestAnimationFrame(next => this.renderFrame(next));
+  }
+
+  private computeCameraPosition(): { x: number; y: number; z: number } {
+    const center = this.computeSceneCenter();
+    const distance = Math.max(this.cam.distance, 1500);
+    const pitch = this.cam.pitch;
+    const yaw = this.cam.yaw;
+    const cosPitch = Math.cos(pitch);
+    return {
+      x: center.x + Math.cos(yaw) * distance * cosPitch,
+      y: center.y + Math.sin(yaw) * distance * cosPitch,
+      z: center.z + Math.sin(pitch) * distance
+    };
+  }
+
+  private computeSceneCenter(): { x: number; y: number; z: number } {
+    let minX = Number.POSITIVE_INFINITY;
+    let minY = Number.POSITIVE_INFINITY;
+    let maxX = Number.NEGATIVE_INFINITY;
+    let maxY = Number.NEGATIVE_INFINITY;
+    let hasGeometry = false;
+    for (const wall of this.walls) {
+      minX = Math.min(minX, wall.a.x, wall.b.x);
+      minY = Math.min(minY, wall.a.y, wall.b.y);
+      maxX = Math.max(maxX, wall.a.x, wall.b.x);
+      maxY = Math.max(maxY, wall.a.y, wall.b.y);
+      hasGeometry = true;
+    }
+    for (const room of this.rooms) {
+      minX = Math.min(minX, room.x, room.x + room.w);
+      minY = Math.min(minY, room.y, room.y + room.h);
+      maxX = Math.max(maxX, room.x, room.x + room.w);
+      maxY = Math.max(maxY, room.y, room.y + room.h);
+      hasGeometry = true;
+    }
+    if (!hasGeometry) {
+      return { x: 0, y: 0, z: this.wallHeight / 2 };
+    }
+    return {
+      x: (minX + maxX) / 2,
+      y: (minY + maxY) / 2,
+      z: this.wallHeight / 2
+    };
+  }
+
+  private lookAt(eye: { x: number; y: number; z: number }, center: { x: number; y: number; z: number }, up: { x: number; y: number; z: number }): number[] {
+    const forward = this.normalize3({
+      x: eye.x - center.x,
+      y: eye.y - center.y,
+      z: eye.z - center.z
+    });
+    const right = this.normalize3(this.cross3(up, forward));
+    const trueUp = this.cross3(forward, right);
+    return [
+      right.x, trueUp.x, forward.x, 0,
+      right.y, trueUp.y, forward.y, 0,
+      right.z, trueUp.z, forward.z, 0,
+      -this.dot3(right, eye), -this.dot3(trueUp, eye), -this.dot3(forward, eye), 1
+    ];
+  }
+
+  private perspectiveMatrix(fov: number, aspect: number, near: number, far: number): number[] {
+    const f = 1 / Math.tan(fov / 2);
+    const rangeInv = 1 / (near - far);
+    return [
+      f / aspect, 0, 0, 0,
+      0, f, 0, 0,
+      0, 0, (near + far) * rangeInv, -1,
+      0, 0, (2 * near * far) * rangeInv, 0
+    ];
+  }
+
+  private multiplyMatrices(a: number[], b: number[]): number[] {
+    const out = new Array(16).fill(0);
+    for (let row = 0; row < 4; row++) {
+      for (let col = 0; col < 4; col++) {
+        out[row * 4 + col] =
+          a[row * 4 + 0] * b[col + 0] +
+          a[row * 4 + 1] * b[col + 4] +
+          a[row * 4 + 2] * b[col + 8] +
+          a[row * 4 + 3] * b[col + 12];
+      }
+    }
+    return out;
+  }
+
+  private multiplyMatrixVector(m: number[], v: [number, number, number, number]): [number, number, number, number] {
+    return [
+      m[0] * v[0] + m[4] * v[1] + m[8] * v[2] + m[12] * v[3],
+      m[1] * v[0] + m[5] * v[1] + m[9] * v[2] + m[13] * v[3],
+      m[2] * v[0] + m[6] * v[1] + m[10] * v[2] + m[14] * v[3],
+      m[3] * v[0] + m[7] * v[1] + m[11] * v[2] + m[15] * v[3]
+    ];
+  }
+
+  private transformPoint(matrix: number[], point: { x: number; y: number; z: number }, width: number, height: number):
+    { x: number; y: number; depth: number } | null {
+    const [x, y, z, w] = this.multiplyMatrixVector(matrix, [point.x, point.y, point.z, 1]);
+    if (w <= 0) {
+      return null;
+    }
+    const invW = 1 / w;
+    const ndcX = x * invW;
+    const ndcY = y * invW;
+    const ndcZ = z * invW;
+    return {
+      x: (ndcX * 0.5 + 0.5) * width,
+      y: (-ndcY * 0.5 + 0.5) * height,
+      depth: ndcZ
+    };
+  }
+
+  private drawWallFace(ctx: CanvasRenderingContext2D, matrix: number[], face: WallFace, width: number, height: number): void {
+    const base = face.corners.map(c => this.transformPoint(matrix, { x: c.x, y: c.y, z: 0 }, width, height));
+    const top = face.corners.map(c => this.transformPoint(matrix, { x: c.x, y: c.y, z: this.wallHeight }, width, height));
+    if (!this.areProjected(base) || !this.areProjected(top)) {
+      return;
+    }
+    const basePts = base;
+    const topPts = top;
+    const color = this.isDark ? 'rgba(96, 165, 250, 0.25)' : 'rgba(59, 130, 246, 0.30)';
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.moveTo(topPts[0].x, topPts[0].y);
+    for (let i = 1; i < topPts.length; i++) {
+      ctx.lineTo(topPts[i].x, topPts[i].y);
+    }
+    ctx.closePath();
+    ctx.fill();
+
+    ctx.strokeStyle = this.isDark ? '#1d4ed8' : '#1d4ed8';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(topPts[0].x, topPts[0].y);
+    for (let i = 1; i < topPts.length; i++) {
+      ctx.lineTo(topPts[i].x, topPts[i].y);
+    }
+    ctx.closePath();
+    ctx.stroke();
+
+    for (let i = 0; i < topPts.length; i++) {
+      const t = topPts[i];
+      const b = basePts[i];
+      ctx.beginPath();
+      ctx.moveTo(b.x, b.y);
+      ctx.lineTo(t.x, t.y);
+      ctx.stroke();
+    }
+  }
+
+  private drawRoomMesh(ctx: CanvasRenderingContext2D, matrix: number[], mesh: RoomMesh, width: number, height: number): void {
+    ctx.fillStyle = this.isDark ? 'rgba(56, 189, 248, 0.25)' : 'rgba(191, 219, 254, 0.45)';
+    ctx.strokeStyle = this.isDark ? '#0ea5e9' : '#0284c7';
+    ctx.lineWidth = 1;
+    for (const face of mesh.faces) {
+      const projected = face.map(corner => this.transformPoint(matrix, { x: corner.x, y: corner.y, z: 0 }, width, height));
+      if (!this.areProjected(projected)) {
+        continue;
+      }
+      ctx.beginPath();
+      ctx.moveTo(projected[0].x, projected[0].y);
+      for (let i = 1; i < projected.length; i++) {
+        ctx.lineTo(projected[i].x, projected[i].y);
+      }
+      ctx.closePath();
+      ctx.fill();
+      ctx.stroke();
+    }
+  }
+
+  private drawMeasurement3d(
+    ctx: CanvasRenderingContext2D,
+    matrix: number[],
+    measurement: MeasurementSegment,
+    width: number,
+    height: number,
+    isDraft: boolean
+  ): void {
+    const baseHeight = isDraft ? 120 : 80;
+    const a = this.transformPoint(matrix, { x: measurement.a.x, y: measurement.a.y, z: baseHeight }, width, height);
+    const b = this.transformPoint(matrix, { x: measurement.b.x, y: measurement.b.y, z: baseHeight }, width, height);
+    if (!a || !b) {
+      return;
+    }
+    ctx.setLineDash(isDraft ? [4, 4] : [8, 6]);
+    ctx.strokeStyle = '#7c3aed';
+    ctx.lineWidth = isDraft ? 1 : 2;
+    ctx.beginPath();
+    ctx.moveTo(a.x, a.y);
+    ctx.lineTo(b.x, b.y);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.fillStyle = '#7c3aed';
+    ctx.font = '12px "Inter", system-ui, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    const midX = (a.x + b.x) / 2;
+    const midY = (a.y + b.y) / 2 - 10;
+    const label = this.formatLength(measurement.length);
+    ctx.fillText(label, midX, midY);
+  }
+
+  private dot3(a: { x: number; y: number; z: number }, b: { x: number; y: number; z: number }): number {
+    return a.x * b.x + a.y * b.y + a.z * b.z;
+  }
+
+  private cross3(a: { x: number; y: number; z: number }, b: { x: number; y: number; z: number }): { x: number; y: number; z: number } {
+    return {
+      x: a.y * b.z - a.z * b.y,
+      y: a.z * b.x - a.x * b.z,
+      z: a.x * b.y - a.y * b.x
+    };
+  }
+
+  private normalize3(v: { x: number; y: number; z: number }): { x: number; y: number; z: number } {
+    const len = Math.hypot(v.x, v.y, v.z) || 1;
+    return { x: v.x / len, y: v.y / len, z: v.z / len };
+  }
+
+  private areProjected(
+    points: ({ x: number; y: number; depth: number } | null)[]
+  ): points is { x: number; y: number; depth: number }[] {
+    return points.every((pt): pt is { x: number; y: number; depth: number } => pt !== null);
   }
 
   private setSaveState(state: 'idle'|'saving'|'success'|'error', message = ''): void {
