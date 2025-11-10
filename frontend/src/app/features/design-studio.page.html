@@ -110,12 +110,12 @@
             <button class="px-3 py-1 rounded" (click)="clearAll()">Clear</button>
           </div>
           <div class="grid grid-cols-2 gap-2 items-center">
-            <label class="text-slate-600">Thickness (mm)</label>
-            <input type="number" class="rounded px-2 py-1" [(ngModel)]="wallThickness" />
-            <label class="text-slate-600">Wall height (mm)</label>
-            <input type="number" class="rounded px-2 py-1" [(ngModel)]="wallHeight" />
-            <label class="text-slate-600">Opening width (mm)</label>
-            <input type="number" class="rounded px-2 py-1" [(ngModel)]="openingWidth" />
+            <label class="text-slate-600" for="wallThicknessInput">Thickness (mm)</label>
+            <input id="wallThicknessInput" type="number" class="rounded px-2 py-1" [(ngModel)]="wallThickness" />
+            <label class="text-slate-600" for="wallHeightInput">Wall height (mm)</label>
+            <input id="wallHeightInput" type="number" class="rounded px-2 py-1" [(ngModel)]="wallHeight" />
+            <label class="text-slate-600" for="openingWidthInput">Opening width (mm)</label>
+            <input id="openingWidthInput" type="number" class="rounded px-2 py-1" [(ngModel)]="openingWidth" />
           </div>
           <label class="inline-flex items-center gap-2"><input type="checkbox" [(ngModel)]="snap"> Snap to grid</label>
         </div>
@@ -159,10 +159,18 @@
 
       <!-- Left-center zoom tools -->
       <div class=" bg-white/90 dark:bg-slate-900/70 rounded-lg p-2 shadow-lg flex flex-col gap-2 text-sm z-10">
-        <button class="px-2 py-1 rounded material-symbols-outlined cursor-pointer" (click)="zoom(1/1.1)">add</button>
-        <button class="px-2 py-1 rounded material-symbols-outlined cursor-pointer" (click)="zoom(1.1)">remove</button>
-        <button class="px-2 py-1 rounded material-symbols-outlined cursor-pointer"
-          (click)="resetView()">center_focus_strong</button>
+        <button type="button" class="px-2 py-1 rounded cursor-pointer" aria-label="Zoom in" (click)="zoom(1/1.1)">
+          <span class="material-symbols-outlined" aria-hidden="true">add</span>
+        </button>
+        <button type="button" class="px-2 py-1 rounded cursor-pointer" aria-label="Zoom out" (click)="zoom(1.1)">
+          <span class="material-symbols-outlined" aria-hidden="true">remove</span>
+        </button>
+        <button type="button" class="px-2 py-1 rounded cursor-pointer" aria-label="Reset view" (click)="resetView()">
+          <span class="material-symbols-outlined" aria-hidden="true">center_focus_strong</span>
+        </button>
+        <button type="button" class="px-2 py-1 rounded cursor-pointer" aria-label="Fit to content" (click)="fitToContent()">
+          <span class="material-symbols-outlined" aria-hidden="true">crop_free</span>
+        </button>
       </div>
     </div>
 
@@ -172,13 +180,28 @@
       <div *ngIf="viewPort==='2d'; else threeD" #view2d class="h-full w-full overflow-hidden">
         <div class="relative h-full w-full" #pane (mousedown)="onMouseDown($event)" (mousemove)="onMouseMove($event)"
           (mouseup)="onMouseUp()" (mouseleave)="onMouseUp()" (wheel)="onWheel($event)">
-          <svg class="w-full h-full block" [attr.viewBox]="viewBox()" (click)="onSvgClick($event)" (dblclick)="onSvgDoubleClick($event)">
+          <svg class="w-full h-full block" [attr.viewBox]="viewBox()" (click)="onSvgClick($event)"
+               (dblclick)="onSvgDoubleClick($event)" (keydown.enter)="onSvgClick($event)"
+               (keydown.space)="onSvgClick($event)" tabindex="0" role="application"
+               aria-label="Design canvas">
             <defs>
-              <pattern id="grid" x="0" y="0" width="50" height="50" patternUnits="userSpaceOnUse">
-                <path d="M 50 0 L 0 0 0 50" fill="none" stroke="#e5e7eb" stroke-width="1" />
+              <pattern id="gridMinor" x="0" y="0" patternUnits="userSpaceOnUse"
+                       [attr.width]="gridSpacing" [attr.height]="gridSpacing">
+                <path [attr.d]="minorGridPath" fill="none" stroke="#cbd5f5"
+                      [attr.stroke-width]="minorGridStrokeWidth"
+                      [attr.stroke-opacity]="minorGridOpacity"></path>
+              </pattern>
+              <pattern id="gridMajor" x="0" y="0" patternUnits="userSpaceOnUse"
+                       [attr.width]="gridMajorSpacing" [attr.height]="gridMajorSpacing">
+                <path [attr.d]="majorGridPath" fill="none" stroke="#94a3b8"
+                      [attr.stroke-width]="majorGridStrokeWidth"
+                      [attr.stroke-opacity]="majorGridOpacity"></path>
               </pattern>
             </defs>
-            <rect [attr.x]="minX" [attr.y]="minY" [attr.width]="width" [attr.height]="height" fill="url(#grid)" />
+            <rect [attr.x]="minX" [attr.y]="minY" [attr.width]="width" [attr.height]="height"
+                  fill="url(#gridMinor)"/>
+            <rect [attr.x]="minX" [attr.y]="minY" [attr.width]="width" [attr.height]="height"
+                  fill="url(#gridMajor)"/>
             <!-- Rooms -->
             <g>
               <rect *ngFor="let r of rooms"
@@ -213,6 +236,56 @@
             <g *ngIf="creating && draftA && draftB">
               <line *ngIf="mode==='wall'" [attr.x1]="draftA.x" [attr.y1]="draftA.y" [attr.x2]="draftB.x" [attr.y2]="draftB.y" stroke="#2563eb" [attr.stroke-width]="wallThickness" stroke-opacity="0.4" />
               <rect *ngIf="mode==='room'" [attr.x]="Math.min(draftA.x,draftB.x)" [attr.y]="Math.min(draftA.y,draftB.y)" [attr.width]="Math.abs(draftA.x-draftB.x)" [attr.height]="Math.abs(draftA.y-draftB.y)" stroke="#2563eb" stroke-width="2" fill="#93c5fd" fill-opacity="0.3" />
+              <g *ngIf="mode==='wall' && draftWallMidpoint() as mid">
+                <text [attr.x]="mid.x" [attr.y]="mid.y - 12" text-anchor="middle" font-size="16" fill="#1d4ed8"
+                      stroke="#ffffff" stroke-width="4" stroke-linejoin="round" paint-order="stroke">
+                  {{ formatLength(draftWallLengthMm()) }}
+                </text>
+                <text [attr.x]="mid.x" [attr.y]="mid.y - 12" text-anchor="middle" font-size="16" fill="#1d4ed8">
+                  {{ formatLength(draftWallLengthMm()) }}
+                </text>
+              </g>
+              <g *ngIf="mode==='room' && draftRoomBounds() as bounds">
+                <text [attr.x]="(bounds.minX + bounds.maxX) / 2" [attr.y]="bounds.minY - 12" text-anchor="middle" font-size="14"
+                      fill="#1d4ed8" stroke="#ffffff" stroke-width="4" stroke-linejoin="round" paint-order="stroke">
+                  {{ formatLength(bounds.maxX - bounds.minX) }}
+                </text>
+                <text [attr.x]="(bounds.minX + bounds.maxX) / 2" [attr.y]="bounds.minY - 12" text-anchor="middle" font-size="14"
+                      fill="#1d4ed8">
+                  {{ formatLength(bounds.maxX - bounds.minX) }}
+                </text>
+                <text [attr.x]="bounds.maxX + 12" [attr.y]="(bounds.minY + bounds.maxY) / 2" font-size="14"
+                      fill="#1d4ed8" stroke="#ffffff" stroke-width="4" stroke-linejoin="round" paint-order="stroke">
+                  {{ formatLength(bounds.maxY - bounds.minY) }}
+                </text>
+                <text [attr.x]="bounds.maxX + 12" [attr.y]="(bounds.minY + bounds.maxY) / 2" font-size="14"
+                      fill="#1d4ed8">
+                  {{ formatLength(bounds.maxY - bounds.minY) }}
+                </text>
+              </g>
+            </g>
+            <g *ngFor="let measurement of measurements" stroke="#7c3aed" stroke-width="2" stroke-dasharray="12 8" fill="none">
+              <line [attr.x1]="measurement.a.x" [attr.y1]="measurement.a.y" [attr.x2]="measurement.b.x" [attr.y2]="measurement.b.y"></line>
+              <ng-container *ngIf="measurementMidpoint(measurement) as mid">
+                <text [attr.x]="mid.x" [attr.y]="mid.y - 10" text-anchor="middle" font-size="14"
+                      fill="#7c3aed" stroke="#ffffff" stroke-width="4" stroke-linejoin="round" paint-order="stroke">
+                  {{ formatLength(measurement.length) }}
+                </text>
+                <text [attr.x]="mid.x" [attr.y]="mid.y - 10" text-anchor="middle" font-size="14" fill="#7c3aed">
+                  {{ formatLength(measurement.length) }}
+                </text>
+              </ng-container>
+            </g>
+            <g *ngIf="mode==='measure' && measureStart && measureDraft && activeMeasurementMidpoint() as mid"
+               stroke="#7c3aed" stroke-width="2" stroke-dasharray="6 6" fill="none">
+              <line [attr.x1]="measureStart.x" [attr.y1]="measureStart.y" [attr.x2]="measureDraft.x" [attr.y2]="measureDraft.y"></line>
+              <text [attr.x]="mid.x" [attr.y]="mid.y - 10" text-anchor="middle" font-size="14"
+                    fill="#7c3aed" stroke="#ffffff" stroke-width="4" stroke-linejoin="round" paint-order="stroke">
+                {{ formatLength(measurementDraftLength()) }}
+              </text>
+              <text [attr.x]="mid.x" [attr.y]="mid.y - 10" text-anchor="middle" font-size="14" fill="#7c3aed">
+                {{ formatLength(measurementDraftLength()) }}
+              </text>
             </g>
           </svg>
           <div *ngIf="selectedWallId && selectedWallPoint && selectedWall as wall"
@@ -268,12 +341,18 @@
         class="h-auto overflow-hidden bg-white/90 dark:bg-slate-900/70 p-3 rounded-lg overflow-x-hidden overflow-y-auto flex flex-col gap-2 shadow-lg text-sm">
         <div class="font-semibold">Visual</div>
         <div class="flex items-center justify-center gap-3">
-          <button
-            class="cursor-pointer h-[30px] w-[30px] px-2 py-1 rounded-full bg-radial-[at_0%_100%] from-slate-400 to-slate-950"></button>
-          <button
-            class="cursor-pointer h-[30px] w-[30px] px-2 py-1 rounded-full bg-radial-[at_0%_100%] from-blue-400 to-blue-800"></button>
-          <button
-            class="cursor-pointer h-[30px] w-[30px] px-2 py-1 rounded-full bg-radial-[at_0%_100%] from-rose-400 via-green-400 to-indigo-400"></button>
+          <button type="button" aria-label="Slate gradient theme"
+            class="cursor-pointer h-[30px] w-[30px] px-2 py-1 rounded-full bg-radial-[at_0%_100%] from-slate-400 to-slate-950">
+            <span class="sr-only">Slate palette</span>
+          </button>
+          <button type="button" aria-label="Ocean gradient theme"
+            class="cursor-pointer h-[30px] w-[30px] px-2 py-1 rounded-full bg-radial-[at_0%_100%] from-blue-400 to-blue-800">
+            <span class="sr-only">Blue palette</span>
+          </button>
+          <button type="button" aria-label="Sunset gradient theme"
+            class="cursor-pointer h-[30px] w-[30px] px-2 py-1 rounded-full bg-radial-[at_0%_100%] from-rose-400 via-green-400 to-indigo-400">
+            <span class="sr-only">Vibrant palette</span>
+          </button>
         </div>
       </div>
       <div #projection
@@ -297,20 +376,55 @@
 
     <!-- Bottom-left scene tools -->
     <div
-      class="absolute bottom-5 left-5 bg-white/90 dark:bg-slate-900/70 rounded-lg p-2 shadow-lg flex items-center gap-3 text-sm">
-      <div class="flex items-center gap-2"><span>Units</span>
+      class="absolute bottom-5 left-5 bg-white/90 dark:bg-slate-900/70 rounded-lg p-3 shadow-lg flex flex-wrap items-center gap-3 text-sm">
+      <div class="flex items-center gap-2">
+        <span>Units</span>
         <select class="rounded px-2 py-1" [(ngModel)]="units">
           <option value="m">meters</option>
           <option value="ft">feet</option>
         </select>
       </div>
-      <button class="px-2 py-1 rounded">Measure distance</button>
+      <div class="flex items-center gap-2">
+        <span>Grid spacing</span>
+        <input class="w-20 rounded border border-slate-300 px-2 py-1"
+               type="number" min="20" max="2000" step="10"
+               [value]="gridSpacing"
+               (change)="onGridSpacingInput($event)"
+               (blur)="onGridSpacingInput($event)">
+      </div>
+      <div class="flex items-center gap-2">
+        <span>Major every</span>
+        <input class="w-16 rounded border border-slate-300 px-2 py-1"
+               type="number" min="1" max="20" step="1"
+               [value]="gridMajorEvery"
+               (change)="onGridMajorEveryInput($event)"
+               (blur)="onGridMajorEveryInput($event)">
+      </div>
+      <label class="flex items-center gap-2">
+        <span>Grid opacity</span>
+        <input type="range" min="0.05" max="1" step="0.05"
+               [value]="gridOpacity"
+               (input)="onGridOpacityInput($event)">
+      </label>
+      <button type="button"
+              class="px-2 py-1 rounded border border-slate-300"
+              [class.bg-blue-100]="mode==='measure'"
+              (click)="toggleMeasureMode()">
+        {{ mode==='measure' ? 'Exit measure' : 'Measure distance' }}
+      </button>
+      <button *ngIf="measurements.length"
+              type="button"
+              class="px-2 py-1 rounded border border-rose-300 text-rose-600 hover:bg-rose-50"
+              (click)="clearMeasurements()">
+        Clear measures
+      </button>
       <label class="inline-flex items-center gap-2"><input type="checkbox" [(ngModel)]="lockConstruction"> Lock
         construction</label>
       <label class="inline-flex items-center gap-2"><input type="checkbox" [(ngModel)]="lockLabels"> Lock labels &
         lines</label>
       <label class="inline-flex items-center gap-2"><input type="checkbox" [(ngModel)]="lockFurniture"> Lock
         furniture</label>
+      <label class="inline-flex items-center gap-2"><input type="checkbox" [(ngModel)]="angleSnap"> Angle snap</label>
     </div>
 
     <!-- Floating AI helper -->

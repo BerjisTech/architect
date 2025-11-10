@@ -3,7 +3,7 @@ package server
 import (
 	"database/sql"
 	"encoding/json"
-	"log"
+	"log/slog"
 	"net/http"
 	"strings"
 	"time"
@@ -21,9 +21,14 @@ type Options struct {
 	DB             *sqlx.DB
 	Env            string
 	CoreAPIBase    string
+	Logger         *slog.Logger
 }
 
 func New(opts Options) *fiber.App {
+	logger := opts.Logger
+	if logger == nil {
+		logger = slog.Default()
+	}
 	app := fiber.New()
 	app.Use(cors.New(cors.Config{
 		AllowOrigins:     opts.AllowedOrigins,
@@ -43,7 +48,7 @@ func New(opts Options) *fiber.App {
 			CoreAPIBase: base,
 			HTTPClient:  httpClient,
 		}); err != nil {
-			log.Printf("warn: coreauth verifier init failed: %v", err)
+			logger.Warn("coreauth verifier init failed", "error", err)
 		} else {
 			authVerifier = v
 		}
@@ -57,6 +62,10 @@ func New(opts Options) *fiber.App {
 	})
 
 	protected := app.Group("/v1", requireAuth)
+	db := opts.DB
+	if db == nil {
+		logger.Warn("database connection not provided; floorplan routes will return 503")
+	}
 
 	// Floorplans CRUD
 	type floorplan struct {
@@ -68,6 +77,10 @@ func New(opts Options) *fiber.App {
 	}
 
 	protected.Post("/floorplans", func(c *fiber.Ctx) error {
+		if db == nil {
+			logger.Error("floorplan create attempted while database unavailable")
+			return c.Status(fiber.StatusServiceUnavailable).JSON(fiber.Map{"success": false, "message": "storage unavailable"})
+		}
 		var in struct {
 			Name        string          `json:"name"`
 			Data        json.RawMessage `json:"data"`
@@ -77,14 +90,19 @@ func New(opts Options) *fiber.App {
 			return c.Status(400).JSON(fiber.Map{"success": false, "message": "invalid body"})
 		}
 		id := strings.ReplaceAll(time.Now().Format("20060102T150405.000Z07:00"), ":", "") + RandomSuffix(4)
-		_, err := opts.DB.Exec(`INSERT INTO floorplans(id,name,owner_user_id,data) VALUES($1,$2,$3,$4)`, id, in.Name, in.OwnerUserID, in.Data)
+		_, err := db.Exec(`INSERT INTO floorplans(id,name,owner_user_id,data) VALUES($1,$2,$3,$4)`, id, in.Name, in.OwnerUserID, in.Data)
 		if err != nil {
+			logger.Error("failed to insert floorplan", "error", err)
 			return c.Status(500).JSON(fiber.Map{"success": false})
 		}
 		return c.JSON(fiber.Map{"success": true, "data": fiber.Map{"id": id}})
 	})
 
 	protected.Put("/floorplans/:id", func(c *fiber.Ctx) error {
+		if db == nil {
+			logger.Error("floorplan update attempted while database unavailable", "id", c.Params("id"))
+			return c.Status(fiber.StatusServiceUnavailable).JSON(fiber.Map{"success": false, "message": "storage unavailable"})
+		}
 		id := c.Params("id")
 		var in struct {
 			Name *string          `json:"name"`
@@ -95,38 +113,54 @@ func New(opts Options) *fiber.App {
 		}
 		// Update name and/or data
 		if in.Name != nil {
-			_, _ = opts.DB.Exec(`UPDATE floorplans SET name=$1, updated_at=now() WHERE id=$2`, *in.Name, id)
+			if _, err := db.Exec(`UPDATE floorplans SET name=$1, updated_at=now() WHERE id=$2`, *in.Name, id); err != nil {
+				logger.Error("failed to update floorplan name", "id", id, "error", err)
+				return c.Status(500).JSON(fiber.Map{"success": false})
+			}
 		}
 		if in.Data != nil {
-			_, _ = opts.DB.Exec(`UPDATE floorplans SET data=$1, updated_at=now() WHERE id=$2`, *in.Data, id)
+			if _, err := db.Exec(`UPDATE floorplans SET data=$1, updated_at=now() WHERE id=$2`, *in.Data, id); err != nil {
+				logger.Error("failed to update floorplan data", "id", id, "error", err)
+				return c.Status(500).JSON(fiber.Map{"success": false})
+			}
 		}
 		return c.JSON(fiber.Map{"success": true})
 	})
 
 	protected.Get("/floorplans/:id", func(c *fiber.Ctx) error {
+		if db == nil {
+			logger.Error("floorplan fetch attempted while database unavailable", "id", c.Params("id"))
+			return c.Status(fiber.StatusServiceUnavailable).JSON(fiber.Map{"success": false, "message": "storage unavailable"})
+		}
 		id := c.Params("id")
 		var row floorplan
-		err := opts.DB.Get(&row, `SELECT id,name,owner_user_id,data,updated_at FROM floorplans WHERE id=$1`, id)
+		err := db.Get(&row, `SELECT id,name,owner_user_id,data,updated_at FROM floorplans WHERE id=$1`, id)
 		if err != nil {
 			if err == sql.ErrNoRows {
 				return c.Status(404).JSON(fiber.Map{"success": false})
 			}
+			logger.Error("failed to load floorplan", "id", id, "error", err)
 			return c.Status(500).JSON(fiber.Map{"success": false})
 		}
 		return c.JSON(fiber.Map{"success": true, "data": row})
 	})
 
 	protected.Get("/floorplans", func(c *fiber.Ctx) error {
+		if db == nil {
+			logger.Error("floorplan list attempted while database unavailable")
+			return c.Status(fiber.StatusServiceUnavailable).JSON(fiber.Map{"success": false, "message": "storage unavailable"})
+		}
 		owner := strings.TrimSpace(c.Query("ownerUserId"))
 		const limit = 100
 		var rows []floorplan
 		var err error
 		if owner != "" {
-			err = opts.DB.Select(&rows, `SELECT id,name,owner_user_id,data,updated_at FROM floorplans WHERE owner_user_id=$1 ORDER BY updated_at DESC LIMIT $2`, owner, limit)
+			err = db.Select(&rows, `SELECT id,name,owner_user_id,data,updated_at FROM floorplans WHERE owner_user_id=$1 ORDER BY updated_at DESC LIMIT $2`, owner, limit)
 		} else {
-			err = opts.DB.Select(&rows, `SELECT id,name,owner_user_id,data,updated_at FROM floorplans ORDER BY updated_at DESC LIMIT $1`, limit)
+			err = db.Select(&rows, `SELECT id,name,owner_user_id,data,updated_at FROM floorplans ORDER BY updated_at DESC LIMIT $1`, limit)
 		}
 		if err != nil {
+			logger.Error("failed to list floorplans", "error", err)
 			return c.Status(500).JSON(fiber.Map{"success": false})
 		}
 		return c.JSON(fiber.Map{"success": true, "data": rows})

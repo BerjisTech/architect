@@ -9,6 +9,18 @@
   --arch-gold: 234 179 8; /* yellow-500/600 midpoint */
 }
 
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
 .hero-gradient { background: radial-gradient(1200px 600px at 80% -10%, rgba(30,58,138,0.18), transparent 60%), linear-gradient(180deg, rgb(15 23 42) 0%, rgb(30 58 138) 100%); }
 .arch-hero { background: radial-gradient(1200px 600px at 80% -10%, rgba(30,58,138,0.08), transparent 60%), radial-gradient(1000px 800px at -10% 10%, rgba(234,179,8,0.08), transparent 55%); }
 

@@ -9,6 +9,7 @@ type Config struct {
 	DatabaseURL    string
 	CoreAPIBase    string
 	AllowedOrigins string
+	MigrationsDir  string
 }
 
 func getenv(k, def string) string {
@@ -26,5 +27,6 @@ func Load() Config {
 		DatabaseURL:    getenv("DATABASE_URL", "postgres://postgres:postgres@localhost:5444/berjis_architect?sslmode=disable"),
 		CoreAPIBase:    getenv("CORE_API_BASE", "http://localhost:8080"),
 		AllowedOrigins: getenv("ALLOWED_ORIGINS", "*"),
+		MigrationsDir:  getenv("MIGRATIONS_DIR", "migrations"),
 	}
 }

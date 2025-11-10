@@ -1,16 +1,9 @@
 import { Injectable } from '@angular/core';
-
-export interface FloorplanRecord {
-  id: string;
-  name: string;
-  ownerUserId?: string;
-  data?: any;
-  updatedAt?: string;
-}
+import { FloorplanRecord } from '../../models/floorplan.model';
 
 @Injectable({ providedIn: 'root' })
 export class StudioService {
-  async create(name: string, data: any, ownerUserId?: string): Promise<string> {
+  async create(name: string, data: unknown, ownerUserId?: string): Promise<string> {
     const payload = await this.request<{ id: string }>(
       '/svc/v1/floorplans',
       {
@@ -24,7 +17,7 @@ export class StudioService {
     return payload.id;
   }
 
-  async update(id: string, patch: { name?: string; data?: any }): Promise<void> {
+  async update(id: string, patch: { name?: string; data?: unknown }): Promise<void> {
     await this.request<void>(
       `/svc/v1/floorplans/${id}`,
       {
@@ -51,14 +44,14 @@ export class StudioService {
     return Array.isArray(result) ? result : [];
   }
 
-  private async request<T>(input: RequestInfo, init: RequestInit, context: string): Promise<T> {
+  private async request<T>(input: RequestInfo | URL, init: RequestInit, context: string): Promise<T> {
     let res: Response;
     try {
       res = await fetch(input, init);
     } catch {
       throw new Error(`Network error while ${context}.`);
     }
-    const body = await this.parseResponse(res, context);
+    const body = await this.parseResponse(res, context) as { success?: boolean; data?: unknown; message?: string };
     if (!res.ok) {
       const message = body?.message || `Service error (${res.status}) while ${context}.`;
       throw new Error(message);
@@ -69,7 +62,7 @@ export class StudioService {
     throw new Error(body?.message || `Unable to complete request while ${context}.`);
   }
 
-  private async parseResponse(res: Response, context: string): Promise<any | null> {
+  private async parseResponse(res: Response, context: string): Promise<unknown> {
     const contentType = res.headers.get('content-type')?.toLowerCase() ?? '';
     if (contentType.includes('application/json')) {
       try {

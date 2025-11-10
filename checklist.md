@@ -8,22 +8,24 @@ Build a comprehensive real estate and construction platform at architect.berjis.
 ## 1. PROJECT SETUP & ARCHITECTURE
 
 ### 1.1 Frontend Setup (Angular)
-- [ ] Initialize Angular project with latest stable version
-- [ ] Configure TypeScript with strict mode
-- [ ] Set up project structure with modular architecture:
+- [x] Initialize Angular project with latest stable version
+- [x] Configure TypeScript with strict mode
+- [x] Set up project structure with modular architecture:
   - `/src/app/core` - Core services, guards, interceptors
   - `/src/app/shared` - Shared components, directives, pipes
   - `/src/app/features` - Feature modules (marketplace, studio, profiles, etc.)
   - `/src/app/models` - TypeScript interfaces and models
-- [ ] Configure environment files for dev/staging/production
-- [ ] Set up routing with lazy loading for all feature modules
-- [ ] Configure Angular Material or custom component library
-- [ ] Set up state management (NgRx or signals-based approach)
-- [ ] Configure build optimization and tree shaking
+- [x] Configure environment files for dev/staging/production
+- [x] Set up routing with lazy loading for all feature modules
+- [x] Configure Angular Material or custom component library
+- [x] Set up state management (NgRx or signals-based approach)
+- [x] Configure build optimization and tree shaking
+
+
 
 ### 1.2 Backend Setup (Go)
-- [ ] Initialize Go project with proper module structure
-- [ ] Set up project architecture:
+- [x] Initialize Go project with proper module structure
+- [x] Set up project architecture:
   - `/cmd` - Application entry points
   - `/internal` - Private application code
   - `/pkg` - Public libraries
@@ -32,17 +34,17 @@ Build a comprehensive real estate and construction platform at architect.berjis.
   - `/services` - Business logic
   - `/middleware` - HTTP middleware
   - `/config` - Configuration management
-- [ ] Configure Go modules and dependency management
-- [ ] Set up environment configuration loader
-- [ ] Configure logging framework (structured logging)
-- [ ] Set up graceful shutdown handling
+- [x] Configure Go modules and dependency management
+- [x] Set up environment configuration loader
+- [x] Configure logging framework (structured logging)
+- [x] Set up graceful shutdown handling
 
 ### 1.3 Database Setup
-- [ ] Choose and set up primary database (PostgreSQL recommended)
-- [ ] Design database schema with proper normalization
-- [ ] Set up migration system (golang-migrate or custom)
-- [ ] Create indexes for performance optimization
-- [ ] Set up database connection pooling
+- [x] Choose and set up primary database (PostgreSQL recommended)
+- [x] Design database schema with proper normalization
+- [x] Set up migration system (golang-migrate or custom)
+- [x] Create indexes for performance optimization
+- [x] Set up database connection pooling
 - [ ] Configure read replicas if needed
 - [ ] Implement backup strategy
 
@@ -53,28 +55,28 @@ Build a comprehensive real estate and construction platform at architect.berjis.
   - Billing (payment processing, invoicing)
   - Support (ticket creation, messaging)
 - [ ] Create Go client library for api.berjis.tech
-- [ ] Implement JWT token validation and refresh logic
+- [x] Implement JWT token validation and refresh logic
 - [ ] Set up API key/secret management for service-to-service auth
 - [ ] Create Angular interceptor for auth token injection
-- [ ] Implement token storage (secure, HttpOnly cookies or encrypted localStorage)
-- [ ] Create auth guard for protected routes
+- [x] Implement token storage (secure, HttpOnly cookies or encrypted localStorage)
+- [x] Create auth guard for protected routes
 
 ---
 
 ## 2. AUTHENTICATION & AUTHORIZATION
 
 ### 2.1 Frontend Auth
-- [ ] Create auth service to communicate with api.berjis.tech
-- [ ] Implement login/logout flows
-- [ ] Create auth guard for route protection
-- [ ] Implement token refresh mechanism with automatic retry
-- [ ] Handle token expiration and redirect to login
-- [ ] Create role-based access control (RBAC) system
-- [ ] Implement permission-based UI rendering
+- [x] Create auth service to communicate with api.berjis.tech
+- [x] Implement login/logout flows
+- [x] Create auth guard for route protection
+- [x] Implement token refresh mechanism with automatic retry
+- [x] Handle token expiration and redirect to login
+- [x] Create role-based access control (RBAC) system
+- [x] Implement permission-based UI rendering
 
 ### 2.2 Backend Auth
-- [ ] Create middleware to validate JWT tokens from api.berjis.tech
-- [ ] Implement user session management
+- [x] Create middleware to validate JWT tokens from api.berjis.tech
+- [x] Implement user session management
 - [ ] Create authorization middleware for role checking
 - [ ] Implement API key validation for service endpoints
 - [ ] Set up rate limiting per user/session
@@ -175,23 +177,23 @@ Build a comprehensive real estate and construction platform at architect.berjis.
 ## 5. STUDIO MODULE (Floor Plan Designer)
 
 ### 5.1 Canvas & Drawing Engine Architecture
-- [ ] Choose rendering approach:
+- [x] Choose rendering approach:
   - **Recommended: SVG for 2D** (better for precision, manipulation, and element selection)
   - **WebGL for 3D** (Three.js recommended for performance and features)
   - HTML5 Canvas as fallback for performance-critical operations
 - [ ] Implement dual-viewport system (2D and 3D synchronized views)
-- [ ] Create coordinate system with origin point
-- [ ] Implement grid system with:
-  - Snap-to-grid toggle
-  - Configurable grid spacing (metric: cm/m, imperial: in/ft)
-  - Visual grid display with major/minor lines
-  - Grid opacity control
+- [x] Create coordinate system with origin point
+- [x] Implement grid system with:
+  - [x] Snap-to-grid toggle
+  - [x] Configurable grid spacing (metric: cm/m, imperial: in/ft)
+  - [x] Visual grid display with major/minor lines
+  - [x] Grid opacity control
 - [ ] Create viewport management:
-  - Zoom levels (10% to 1000%)
-  - Pan with mouse drag or keyboard
-  - Fit-to-view functionality
-  - Zoom to selection
-  - Reset view position
+  - [x] Zoom levels (10% to 1000%)
+  - [x] Pan with mouse drag or keyboard
+  - [x] Fit-to-view functionality
+  - [ ] Zoom to selection
+  - [x] Reset view position
 - [ ] Implement rendering optimization:
   - Viewport culling (only render visible elements)
   - Level of detail (LOD) for complex objects
@@ -206,11 +208,11 @@ Build a comprehensive real estate and construction platform at architect.berjis.
   - Move mouse shows preview line
   - Second click sets end point and creates wall
   - Automatic snap to grid points
-  - Automatic snap to existing wall endpoints
-  - Angle snapping (0°, 45°, 90°, 135°, 180°, etc.)
-  - Display distance measurement while drawing
-  - ESC key to cancel current wall drawing
-- [ ] Create continuous wall drawing mode:
+  - [x] Automatic snap to existing wall endpoints
+  - [x] Angle snapping (0°, 45°, 90°, 135°, 180°, etc.)
+  - [x] Display distance measurement while drawing
+  - [x] ESC key to cancel current wall drawing
+- [x] Create continuous wall drawing mode:
   - After creating wall, automatically start new wall from endpoint
   - Double-click or press Enter to finish wall chain
   - Right-click to undo last segment
@@ -218,7 +220,7 @@ Build a comprehensive real estate and construction platform at architect.berjis.
   - Maintain parallel/perpendicular to existing walls
   - Minimum wall length validation
   - Maximum wall length warnings
-  - Angle constraints (orthogonal mode)
+  - [x] Angle constraints (orthogonal mode)
 
 #### 5.2.2 Wall Intersection & Auto-Splitting
 - [ ] Implement automatic wall intersection detection:
@@ -904,7 +906,7 @@ Build a comprehensive real estate and construction platform at architect.berjis.
 ### 6.2 Plan Customization
 - [ ] Implement "customize this plan" functionality
 - [ ] Create plan modification workflow
-- [ ] Allow opening plans in Studio for editing
+- [x] Allow opening plans in Studio for editing
 - [ ] Implement custom plan request system
 - [ ] Add plan comparison feature
 - [ ] Create favorite/saved plans functionality

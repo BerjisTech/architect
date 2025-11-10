@@ -1,7 +1,9 @@
 import { Component, ElementRef, HostListener, OnDestroy, OnInit, ViewChild } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
-import { StudioService } from '../services/studio.service';
+import { StudioService } from '../core/services/studio.service';
+import { StudioStateService } from '../core/state/studio-state.service';
+import { FloorplanRecord } from '../models/floorplan.model';
 import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 import { Subscription } from 'rxjs';
 import { CoreAuthService, CoreAuthSession } from '@berjis/angular-auth';
@@ -11,6 +13,9 @@ type Opening = { id: string; kind: 'door'|'window'; offset: number; width: numbe
 type Wall = { id: string; a: Point; b: Point; thickness: number; height: number; openings: Opening[] };
 type Room = { id: string; x: number; y: number; w: number; h: number; height: number };
 type WallDragAnchor = { wall: Wall; end: 'a'|'b'; point: Point };
+type MeasurementSegment = { id: string; a: Point; b: Point; length: number };
+type WallFace = { id: string; corners: [Point, Point, Point, Point]; wallId: string };
+type RoomMesh = { id: string; faces: Array<[Point, Point, Point, Point]> };
 
 @Component({
   selector: 'arch-design-studio',
@@ -28,13 +33,20 @@ export class DesignStudioPage implements OnInit, OnDestroy {
   lockConstruction = false;
   lockLabels = false;
   lockFurniture = false;
+  angleSnap = true;
+  readonly defaultViewBox = { minX: -1000, minY: -800, width: 2000, height: 1600 };
+  private readonly defaultGridSpacing = 100;
+  private readonly defaultGridMajorEvery = 5;
+  private readonly defaultGridOpacity = 0.35;
 
   // Drawing state
-  mode: 'select'|'pan'|'wall'|'room'|'door'|'window' = 'select';
+  mode: 'select'|'pan'|'wall'|'room'|'door'|'window'|'measure' = 'select';
   creating = false;
   // world objects
   walls: Wall[] = [];
   rooms: Room[] = [];
+  roomMeshes: RoomMesh[] = [];
+  wallFaces: WallFace[] = [];
   // temp preview
   draftA: Point | null = null; // for wall start or room start
   draftB: Point | null = null; // current cursor position in drag
@@ -54,8 +66,12 @@ export class DesignStudioPage implements OnInit, OnDestroy {
   lengthDelta = 200;
 
   // Viewport (world units)
-  minX = -1000; minY = -800; width = 2000; height = 1600;
+  minX = this.defaultViewBox.minX; minY = this.defaultViewBox.minY;
+  width = this.defaultViewBox.width; height = this.defaultViewBox.height;
   scale = 1; // 1 == 1:1 world units
+  gridSpacing = this.defaultGridSpacing;
+  gridMajorEvery = this.defaultGridMajorEvery;
+  gridOpacity = this.defaultGridOpacity;
 
   private panning = false;
   private panStart = { x: 0, y: 0 };
@@ -70,9 +86,15 @@ export class DesignStudioPage implements OnInit, OnDestroy {
 
   private authUnsub?: () => void;
   private userUuid: string | null = null;
+  private animationId: number | null = null;
+  private lastFrame = 0;
+  private cam = { yaw: 0, pitch: -0.6, distance: 4500 };
 
   private qpSub?: Subscription;
   private statusTimer: ReturnType<typeof setTimeout> | null = null;
+  measureStart: Point | null = null;
+  measureDraft: Point | null = null;
+  measurements: MeasurementSegment[] = [];
 
   title = 'Architect';
   isDark = false;
@@ -144,9 +166,29 @@ export class DesignStudioPage implements OnInit, OnDestroy {
 
   // Pointer events
   onSvgClick(e: MouseEvent){
-    const pRaw = this.toWorld(e);
-    const p = this.snap ? this.snapPoint(pRaw) : pRaw;
+    const raw = this.toWorld(e);
+    if(this.mode==='measure'){
+      const point = this.resolveGenericPoint(raw);
+      if(!this.measureStart){
+        this.measureStart = { ...point };
+        this.measureDraft = { ...point };
+        this.setSaveState('idle', 'Select a second point to measure distance.');
+      } else {
+        if(!this.samePoint(this.measureStart, point)){
+          const length = this.segLen(this.measureStart, point);
+          this.measurements = [
+            ...this.measurements,
+            { id: this.uid(), a: { ...this.measureStart }, b: { ...point }, length }
+          ];
+          this.setSaveState('success', `Measured ${this.formatLength(length)}.`);
+        }
+        this.measureStart = null;
+        this.measureDraft = null;
+      }
+      return;
+    }
     if(this.mode==='select'){
+      const p = this.resolveGenericPoint(raw);
       const hit = this.pickWallAtPoint(p, 30);
       if(hit){
         this.selectedWallId = hit.wall.id;
@@ -163,6 +205,7 @@ export class DesignStudioPage implements OnInit, OnDestroy {
       return;
     }
     if(this.mode==='wall'){
+      const p = this.resolveWallPoint(raw);
       if(!this.creating){
         const start = { ...p };
         this.creating = true;
@@ -170,11 +213,12 @@ export class DesignStudioPage implements OnInit, OnDestroy {
         this.draftA = start;
         this.draftB = start;
       } else {
-        this.addWallSegment({ ...p });
+        this.addWallSegment(p);
       }
       return;
     }
     if(this.mode==='room'){
+      const p = this.resolveGenericPoint(raw);
       if(!this.creating){
         const start = { ...p };
         this.creating = true;
@@ -188,6 +232,7 @@ export class DesignStudioPage implements OnInit, OnDestroy {
     }
     // placing doors/windows with single click
     if(this.mode==='door' || this.mode==='window'){
+      const p = this.resolveGenericPoint(raw);
       const hit = this.pickWallAtPoint(p, 30);
       if(hit){
         const { wall, t } = hit; // 0..1 along wall
@@ -210,7 +255,7 @@ export class DesignStudioPage implements OnInit, OnDestroy {
     if(this.mode==='pan'){
       this.panning = true; this.panStart = { x: e.clientX, y: e.clientY }; this.viewStart = { minX: this.minX, minY: this.minY }; return;
     }
-    const p = this.snap ? this.snapPoint(this.toWorld(e)) : this.toWorld(e);
+    const p = this.resolveGenericPoint(this.toWorld(e));
     // if select, attempt to start dragging handle
     if(this.mode==='select'){
       const h = this.hitHandle(p);
@@ -229,8 +274,24 @@ export class DesignStudioPage implements OnInit, OnDestroy {
       this.minY = this.viewStart.minY - dy * pxToWorldY;
       return;
     }
-    const p = this.snap ? this.snapPoint(this.toWorld(e)) : this.toWorld(e);
-    if(this.creating && (this.mode==='wall' || this.mode==='room')){ this.draftB = { ...p }; return; }
+    const raw = this.toWorld(e);
+    if(this.mode==='measure'){
+      if(this.measureStart){
+        this.measureDraft = this.resolveGenericPoint(raw);
+      }
+      return;
+    }
+    if(this.creating){
+      if(this.mode==='wall'){
+        this.draftB = this.resolveWallPoint(raw);
+        return;
+      }
+      if(this.mode==='room'){
+        this.draftB = this.resolveGenericPoint(raw);
+        return;
+      }
+    }
+    const p = this.resolveGenericPoint(raw);
     // dragging handles
     if(this.dragging){
       if(this.dragging.kind==='wall-node'){
@@ -258,6 +319,17 @@ export class DesignStudioPage implements OnInit, OnDestroy {
   }
   @HostListener('window:mouseup') winUp(){ this.panning=false; this.dragging=null; }
   @HostListener('window:keydown.escape') cancelGesture(){
+    if(this.mode==='measure'){
+      if(this.measureStart){
+        this.measureStart = null;
+        this.measureDraft = null;
+        this.setSaveState('idle', 'Measurement cancelled.');
+      } else {
+        this.toggleMeasureMode(false);
+      }
+      this.dragging = null;
+      return;
+    }
     if(this.creating){
       if(this.mode==='wall'){ this.finishWallDrawing(); }
       else if(this.mode==='room'){ this.creating=false; this.draftA=null; this.draftB=null; }
@@ -266,7 +338,129 @@ export class DesignStudioPage implements OnInit, OnDestroy {
   }
   onWheel(e: WheelEvent){ e.preventDefault(); const factor = e.deltaY < 0 ? 1/1.1 : 1.1; this.zoom(factor); }
   zoom(f: number){ const cx = this.minX + this.width/2; const cy = this.minY + this.height/2; this.width *= f; this.height *= f; this.minX = cx - this.width/2; this.minY = cy - this.height/2; this.scale = 2000 / this.width; }
-  resetView(){ this.minX=-1000; this.minY=-800; this.width=2000; this.height=1600; this.scale=1; }
+  resetView(){
+    this.minX = this.defaultViewBox.minX;
+    this.minY = this.defaultViewBox.minY;
+    this.width = this.defaultViewBox.width;
+    this.height = this.defaultViewBox.height;
+    this.scale = 1;
+  }
+  fitToContent(): void {
+    const points: Point[] = [];
+    for (const wall of this.walls) {
+      points.push(wall.a, wall.b);
+    }
+    for (const room of this.rooms) {
+      points.push(
+        { x: room.x, y: room.y },
+        { x: room.x + room.w, y: room.y },
+        { x: room.x, y: room.y + room.h },
+        { x: room.x + room.w, y: room.y + room.h }
+      );
+    }
+    if (points.length === 0) {
+      this.resetView();
+      return;
+    }
+    let minX = Number.POSITIVE_INFINITY;
+    let minY = Number.POSITIVE_INFINITY;
+    let maxX = Number.NEGATIVE_INFINITY;
+    let maxY = Number.NEGATIVE_INFINITY;
+    for (const p of points) {
+      if (p.x < minX) { minX = p.x; }
+      if (p.y < minY) { minY = p.y; }
+      if (p.x > maxX) { maxX = p.x; }
+      if (p.y > maxY) { maxY = p.y; }
+    }
+    if (!Number.isFinite(minX) || !Number.isFinite(minY) || !Number.isFinite(maxX) || !Number.isFinite(maxY)) {
+      this.resetView();
+      return;
+    }
+    const padding = Math.max(this.gridSpacing * 2, 200);
+    const width = Math.max(maxX - minX, 400);
+    const height = Math.max(maxY - minY, 400);
+    this.minX = minX - padding;
+    this.minY = minY - padding;
+    this.width = width + padding * 2;
+    this.height = height + padding * 2;
+    this.scale = 2000 / this.width;
+  }
+
+  updateGridSpacing(value: number | string): void {
+    const numeric = Number(value);
+    if (Number.isFinite(numeric)) {
+      this.gridSpacing = this.clamp(Math.round(numeric), 20, 2000);
+    }
+  }
+  onGridSpacingInput(event: Event): void {
+    const target = event.target as HTMLInputElement | null;
+    this.updateGridSpacing(target?.value ?? this.gridSpacing);
+  }
+
+  updateGridMajorEvery(value: number | string): void {
+    const numeric = Number(value);
+    if (Number.isFinite(numeric)) {
+      this.gridMajorEvery = this.clamp(Math.round(numeric), 1, 20);
+    }
+  }
+  onGridMajorEveryInput(event: Event): void {
+    const target = event.target as HTMLInputElement | null;
+    this.updateGridMajorEvery(target?.value ?? this.gridMajorEvery);
+  }
+
+  updateGridOpacity(value: number | string): void {
+    const numeric = Number(value);
+    if (Number.isFinite(numeric)) {
+      this.gridOpacity = this.clamp(numeric, 0.05, 1);
+    }
+  }
+  onGridOpacityInput(event: Event): void {
+    const target = event.target as HTMLInputElement | null;
+    this.updateGridOpacity(target?.value ?? this.gridOpacity);
+  }
+
+  get gridMajorSpacing(): number {
+    return Math.max(this.gridSpacing * this.gridMajorEvery, this.gridSpacing);
+  }
+
+  get minorGridPath(): string {
+    const g = this.gridSpacing;
+    return `M ${g} 0 L 0 0 0 ${g}`;
+  }
+
+  get majorGridPath(): string {
+    const g = this.gridMajorSpacing;
+    return `M ${g} 0 L 0 0 0 ${g}`;
+  }
+
+  get minorGridStrokeWidth(): number {
+    return Math.max(0.5, this.gridSpacing / 120);
+  }
+
+  get majorGridStrokeWidth(): number {
+    return Math.max(0.75, this.minorGridStrokeWidth * 1.5);
+  }
+
+  get minorGridOpacity(): number {
+    return this.clamp(this.gridOpacity, 0, 1);
+  }
+
+  get majorGridOpacity(): number {
+    return this.clamp(this.gridOpacity * 1.5, 0, 1);
+  }
+
+  private clamp(value: number, min: number, max: number): number {
+    if (Number.isNaN(value)) {
+      return min;
+    }
+    return Math.min(max, Math.max(min, value));
+  }
+
+  private resetGridSettings(): void {
+    this.gridSpacing = this.defaultGridSpacing;
+    this.gridMajorEvery = this.defaultGridMajorEvery;
+    this.gridOpacity = this.defaultGridOpacity;
+  }
 
   private finishWallDrawing(): void {
     this.creating = false;
@@ -291,8 +485,9 @@ export class DesignStudioPage implements OnInit, OnDestroy {
 
   private addWallSegment(target: Point): void {
     if(!this.draftA){ return; }
-    if(this.samePoint(this.draftA, target)){ return; }
-    const base: Wall = { id:this.uid(), a:this.draftA, b:target, thickness:this.wallThickness, height:this.wallHeight, openings:[] };
+    const resolved = this.resolveWallPoint(target);
+    if(this.samePoint(this.draftA, resolved)){ return; }
+    const base: Wall = { id:this.uid(), a:this.draftA, b:resolved, thickness:this.wallThickness, height:this.wallHeight, openings:[] };
     const newSegs = this.splitAgainstAllWalls(base);
     if(newSegs.length === 0){ return; }
     this.walls.push(...newSegs);
@@ -317,7 +512,93 @@ export class DesignStudioPage implements OnInit, OnDestroy {
     const y = this.minY + (py / rect.height) * this.height;
     return { x: Math.round(x), y: Math.round(y) };
   }
-  private snapPoint(p: Point): Point { const g = 50; return { x: Math.round(p.x/g)*g, y: Math.round(p.y/g)*g }; }
+  private snapPoint(p: Point): Point {
+    const spacing = this.gridSpacing || this.defaultGridSpacing;
+    return {
+      x: Math.round(p.x / spacing) * spacing,
+      y: Math.round(p.y / spacing) * spacing
+    };
+  }
+
+  private resolveWallPoint(raw: Point): Point {
+    const origin = this.wallPath.length > 0 ? this.wallPath[this.wallPath.length - 1] : this.draftA;
+    let point = { ...raw };
+    const snappedExisting = this.snapToExistingNode(point);
+    if (snappedExisting) {
+      return snappedExisting;
+    }
+    if (origin && this.angleSnap) {
+      point = this.applyAngleSnap(origin, point);
+    }
+    if (this.snap && (!origin || !this.angleSnap)) {
+      point = this.snapPoint(point);
+    }
+    const after = this.snapToExistingNode(point);
+    return after ?? point;
+  }
+
+  private resolveGenericPoint(raw: Point): Point {
+    let point = { ...raw };
+    const snappedExisting = this.snapToExistingNode(point);
+    if (snappedExisting) {
+      return snappedExisting;
+    }
+    if (this.snap) {
+      point = this.snapPoint(point);
+    }
+    const after = this.snapToExistingNode(point);
+    return after ?? point;
+  }
+
+  private applyAngleSnap(origin: Point, target: Point): Point {
+    const dx = target.x - origin.x;
+    const dy = target.y - origin.y;
+    if (Math.abs(dx) < 1e-6 && Math.abs(dy) < 1e-6) {
+      return { ...target };
+    }
+    const step = Math.PI / 4;
+    const length = Math.hypot(dx, dy);
+    const angle = Math.atan2(dy, dx);
+    const snapped = Math.round(angle / step) * step;
+    return {
+      x: origin.x + length * Math.cos(snapped),
+      y: origin.y + length * Math.sin(snapped)
+    };
+  }
+
+  private snapToExistingNode(point: Point, tolerance = 18): Point | null {
+    let closest: Point | null = null;
+    let best = tolerance;
+    for (const node of this.wallHandlesList) {
+      const d = this.dist(node.point, point);
+      if (d <= best) {
+        best = d;
+        closest = node.point;
+      }
+    }
+    for (const wp of this.wallPath) {
+      const d = this.dist(wp, point);
+      if (d <= best) {
+        best = d;
+        closest = wp;
+      }
+    }
+    if (this.draftA) {
+      const d = this.dist(this.draftA, point);
+      if (d <= best) {
+        best = d;
+        closest = this.draftA;
+      }
+    }
+    if (this.draftB && this.creating) {
+      const d = this.dist(this.draftB, point);
+      if (d <= best) {
+        best = d;
+        closest = this.draftB;
+      }
+    }
+    return closest ? { x: closest.x, y: closest.y } : null;
+  }
   // geometry helpers
   private segLen(a:Point,b:Point){ const dx=b.x-a.x, dy=b.y-a.y; return Math.hypot(dx,dy); }
   private unitVector(a:Point,b:Point){
@@ -485,6 +766,7 @@ export class DesignStudioPage implements OnInit, OnDestroy {
   constructor(
     private auth: CoreAuthService,
     private studio: StudioService,
+    private studioState: StudioStateService,
     private router: Router,
     private route: ActivatedRoute
   ) {}
@@ -497,12 +779,21 @@ export class DesignStudioPage implements OnInit, OnDestroy {
     return {
       walls:this.walls,
       rooms:this.rooms,
-      view:{minX:this.minX,minY:this.minY,width:this.width,height:this.height}
+      view:{minX:this.minX,minY:this.minY,width:this.width,height:this.height},
+      grid:{
+        spacing:this.gridSpacing,
+        majorEvery:this.gridMajorEvery,
+        opacity:this.gridOpacity
+      }
     };
   }
 
   private loadModel(m:any){
     this.clearAll();
+    this.resetGridSettings();
+    this.measurements = [];
+    this.measureStart = null;
+    this.measureDraft = null;
     this.walls=m?.walls||[];
     this.rooms=m?.rooms||[];
     const v=m?.view||{};
@@ -510,23 +801,34 @@ export class DesignStudioPage implements OnInit, OnDestroy {
     this.minY=v.minY??this.minY;
     this.width=v.width??this.width;
     this.height=v.height??this.height;
+    const g = m?.grid || {};
+    this.updateGridSpacing(g.spacing ?? this.gridSpacing);
+    this.updateGridMajorEvery(g.majorEvery ?? this.gridMajorEvery);
+    this.updateGridOpacity(g.opacity ?? this.gridOpacity);
   }
 
   private beginNewPlan(): void {
     this.planId = null;
+    this.studioState.selectPlan(null);
     this.name = '';
     this.lastSavedAt = null;
     this.loadingPlan = false;
+    this.resetGridSettings();
     this.resetView();
     this.clearAll();
+    this.measureStart = null;
+    this.measureDraft = null;
+    this.measurements = [];
     this.setSaveState('idle', 'New plan ready');
   }
 
   private async loadPlan(id: string): Promise<void> {
     this.loadingPlan = true;
     try {
-      const fp = await this.studio.get(id);
+      const fp: FloorplanRecord = await this.studio.get(id);
       this.planId = fp.id;
+      this.studioState.selectPlan(fp.id);
+      this.studioState.upsertPlan(fp);
       this.name = fp.name ?? '';
       this.loadModel(fp.data);
       this.lastSavedAt = fp.updatedAt ? new Date(fp.updatedAt) : null;
@@ -549,14 +851,27 @@ export class DesignStudioPage implements OnInit, OnDestroy {
     this.setSaveState('saving', 'Saving...');
     try {
       const payload = this.serialize();
-      if (!this.planId) {
-        const id = await this.studio.create(trimmed, payload, this.userUuid || undefined);
-        this.planId = id;
-        await this.updateQuery({ plan: id, new: null });
+      let persistedId = this.planId ?? null;
+      if (!persistedId) {
+        persistedId = await this.studio.create(trimmed, payload, this.userUuid ?? undefined);
+        this.planId = persistedId;
+        await this.updateQuery({ plan: persistedId, new: null });
       } else {
-        await this.studio.update(this.planId, { name: trimmed, data: payload });
+        await this.studio.update(persistedId, { name: trimmed, data: payload });
       }
       this.lastSavedAt = new Date();
+      const savedAtIso = this.lastSavedAt.toISOString();
+      const ownerUserId = this.userUuid ?? undefined;
+      if (persistedId) {
+        this.studioState.selectPlan(persistedId);
+        this.studioState.upsertPlan({
+          id: persistedId,
+          name: trimmed,
+          ownerUserId,
+          updatedAt: savedAtIso,
+          data: payload as FloorplanRecord['data']
+        });
+      }
       this.setSaveState('success', `Saved at ${this.lastSavedLabel()}`);
     } catch (err: any) {
       const message = err?.message || 'Save failed';
@@ -574,6 +889,50 @@ export class DesignStudioPage implements OnInit, OnDestroy {
     }
     const feet = lengthMm * 0.00328084;
     return `${feet.toFixed(2)} ft`;
+  }
+  draftWallLengthMm(): number {
+    if (!(this.creating && this.mode === 'wall' && this.draftA && this.draftB)) {
+      return 0;
+    }
+    return this.segLen(this.draftA, this.draftB);
+  }
+  draftWallMidpoint(): Point | null {
+    if (!(this.creating && this.mode === 'wall' && this.draftA && this.draftB)) {
+      return null;
+    }
+    return {
+      x: (this.draftA.x + this.draftB.x) / 2,
+      y: (this.draftA.y + this.draftB.y) / 2
+    };
+  }
+  draftRoomBounds(): { minX: number; minY: number; maxX: number; maxY: number } | null {
+    if (!(this.creating && this.mode === 'room' && this.draftA && this.draftB)) {
+      return null;
+    }
+    return {
+      minX: Math.min(this.draftA.x, this.draftB.x),
+      minY: Math.min(this.draftA.y, this.draftB.y),
+      maxX: Math.max(this.draftA.x, this.draftB.x),
+      maxY: Math.max(this.draftA.y, this.draftB.y)
+    };
+  }
+  measurementDraftLength(): number {
+    if (!(this.mode === 'measure' && this.measureStart && this.measureDraft)) {
+      return 0;
+    }
+    return this.segLen(this.measureStart, this.measureDraft);
+  }
+  measurementMidpoint(segment: { a: Point; b: Point }): Point {
+    return {
+      x: (segment.a.x + segment.b.x) / 2,
+      y: (segment.a.y + segment.b.y) / 2
+    };
+  }
+  activeMeasurementMidpoint(): Point | null {
+    if (!(this.mode === 'measure' && this.measureStart && this.measureDraft)) {
+      return null;
+    }
+    return this.measurementMidpoint({ a: this.measureStart, b: this.measureDraft });
   }
   wallLengthMm(wall: Wall): number {
     return this.segLen(wall.a, wall.b);
@@ -663,6 +1022,32 @@ export class DesignStudioPage implements OnInit, OnDestroy {
     this.selectedWallPoint = null;
     this.selectedWallT = null;
     this.setSaveState('idle', 'Wall removed.');
+  }
+
+  toggleMeasureMode(force?: boolean): void {
+    const next = force !== undefined ? force : this.mode !== 'measure';
+    if (next) {
+      if (this.creating) {
+        this.finishWallDrawing();
+      }
+      this.mode = 'measure';
+      this.measureStart = null;
+      this.measureDraft = null;
+      this.setSaveState('idle', 'Measurement mode on. Click two points to measure.');
+    } else {
+      this.mode = 'select';
+      this.measureStart = null;
+      this.measureDraft = null;
+      this.setSaveState('idle', 'Measurement mode off.');
+    }
+  }
+
+  clearMeasurements(): void {
+    if (this.measurements.length === 0) {
+      return;
+    }
+    this.measurements = [];
+    this.setSaveState('idle', 'Measurements cleared.');
   }
 
   private setSaveState(state: 'idle'|'saving'|'success'|'error', message = ''): void {

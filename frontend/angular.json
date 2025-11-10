@@ -76,6 +76,21 @@
               "namedChunks": false,
               "extractLicenses": true
             },
+            "staging": {
+              "fileReplacements": [
+                {
+                  "replace": "src/environments/environment.ts",
+                  "with": "src/environments/environment.staging.ts"
+                }
+              ],
+              "outputHashing": "all",
+              "optimization": {
+                "scripts": true,
+                "styles": true
+              },
+              "sourceMap": true,
+              "extractLicenses": true
+            },
             "development": {
               "optimization": false,
               "extractLicenses": false,
@@ -89,6 +104,9 @@
           "configurations": {
             "production": {
               "buildTarget": "architect:build:production"
+            },
+            "staging": {
+              "buildTarget": "architect:build:staging"
             },
             "development": {
               "buildTarget": "architect:build:development"

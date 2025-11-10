@@ -4,7 +4,7 @@ const apiBase =
   typeof globalWindow?.__CORE_API__ === 'string' ? (globalWindow.__CORE_API__ as string) : 'https://api.berjis.tech';
 
 export const environment = {
-  production: true,
-  staging: false,
+  production: false,
+  staging: true,
   apiBase
 };
