@@ -192,13 +192,15 @@ Build a comprehensive real estate and construction platform at architect.berjis.
   - [x] Zoom levels (10% to 1000%)
   - [x] Pan with mouse drag or keyboard
   - [x] Fit-to-view functionality
-  - [ ] Zoom to selection
+  - [x] Zoom to selection
+    - Smooth viewport easing for reset, fit-to-content, and selection focus
+    - Added UE-style shortcuts (Alt+1-4 lighting, Alt+G/H/K/J view switches, Q/W/E/R tool binds)
   - [x] Reset view position
 - [ ] Implement rendering optimization:
-  - Viewport culling (only render visible elements)
-  - Level of detail (LOD) for complex objects
-  - Lazy rendering for large projects
-  - Render caching for static elements
+  - [x] Viewport culling (only render visible elements)
+  - [ ] Level of detail (LOD) for complex objects
+  - [x] Lazy rendering for large projects
+  - [ ] Render caching for static elements
 
 ### 5.2 Wall Drawing System (Core Feature)
 

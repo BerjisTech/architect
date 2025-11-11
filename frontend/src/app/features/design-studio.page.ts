@@ -16,6 +16,19 @@ type WallDragAnchor = { wall: Wall; end: 'a'|'b'; point: Point };
 type MeasurementSegment = { id: string; a: Point; b: Point; length: number };
 type WallFace = { id: string; corners: [Point, Point, Point, Point]; wallId: string };
 type RoomMesh = { id: string; faces: [Point, Point, Point, Point][] };
+type ViewportBox = { minX: number; minY: number; width: number; height: number };
+type Bounds = { minX: number; minY: number; maxX: number; maxY: number };
+type LightingPreset = 'lit' | 'unlit' | 'wireframe' | 'detail';
+type LightingPalette = {
+  wallFill: string | null;
+  wallEdge: string;
+  wallEdgeWidth: number;
+  roomFill: string | null;
+  roomEdge: string;
+  roomEdgeWidth: number;
+  measurement: string;
+  measurementDraft: string;
+};
 
 @Component({
   selector: 'arch-design-studio',
@@ -57,6 +70,7 @@ export class DesignStudioPage implements OnInit, OnDestroy {
   // Drawing state
   mode: 'select'|'pan'|'wall'|'room'|'door'|'window'|'measure' = 'select';
   creating = false;
+  lightingPreset: LightingPreset = 'lit';
   // world objects
   walls: Wall[] = [];
   rooms: Room[] = [];
@@ -103,6 +117,8 @@ export class DesignStudioPage implements OnInit, OnDestroy {
   private userUuid: string | null = null;
   private animationId: number | null = null;
   private lastFrame = 0;
+  private cameraPreset: 'perspective'|'front'|'side' = 'perspective';
+  private autoOrbit = true;
   private cam = { yaw: 0, pitch: -0.6, distance: 4500 };
 
   private qpSub?: Subscription;
@@ -110,6 +126,9 @@ export class DesignStudioPage implements OnInit, OnDestroy {
   measureStart: Point | null = null;
   measureDraft: Point | null = null;
   measurements: MeasurementSegment[] = [];
+
+  private viewportTween: { raf: number | null; start: number; duration: number; from: ViewportBox; to: ViewportBox } | null = null;
+  private readonly minViewportDimension = 200;
 
   title = 'Architect';
   isDark = false;
@@ -176,13 +195,100 @@ export class DesignStudioPage implements OnInit, OnDestroy {
     this.draftA=null;
     this.draftB=null;
     this.wallPath=[];
-    this.selectedWallId=null;
-    this.selectedWallPoint=null;
-    this.selectedWallT=null;
-    this.selectedRoomId=null;
+    this.clearSelection();
     this.dragging=null;
     this.roomMeshes = [];
     this.wallFaces = [];
+  }
+  private clearSelection(): void {
+    this.selectedWallId = null;
+    this.selectedWallPoint = null;
+    this.selectedWallT = null;
+    this.selectedRoomId = null;
+  }
+  private cancelDraft(): void {
+    if (!this.creating) {
+      return;
+    }
+    this.creating = false;
+    this.draftA = null;
+    this.draftB = null;
+    this.wallPath = [];
+  }
+  private activateModeShortcut(mode: this['mode'], message: string): void {
+    if (mode === 'measure') {
+      this.toggleMeasureMode(true);
+      this.setSaveState('idle', message);
+      return;
+    }
+    if (this.mode === 'measure') {
+      this.toggleMeasureMode(false);
+    }
+    if (this.mode !== mode) {
+      this.cancelDraft();
+    }
+    this.mode = mode;
+    this.setSaveState('idle', message);
+  }
+  private setCameraPreset(preset: 'perspective'|'front'|'side', sourceLabel?: string): void {
+    const previousView = this.viewPort;
+    this.cameraPreset = preset;
+    if (preset === 'perspective') {
+      this.autoOrbit = true;
+      this.cam.pitch = -0.6;
+      this.cam.yaw = Math.PI / 4;
+      this.cam.distance = Math.max(this.cam.distance, 4500);
+    } else {
+      this.autoOrbit = false;
+      this.cam.pitch = -0.1;
+      this.cam.distance = Math.max(this.cam.distance, 3500);
+      this.cam.yaw = preset === 'front' ? Math.PI / 2 : 0;
+    }
+    this.lastFrame = performance.now();
+    if (this.viewPort !== '3d') {
+      this.viewPort = '3d';
+    } else if (previousView === '3d') {
+      this.scheduleFrame();
+    }
+    const label = `${this.describeCameraPreset()}${sourceLabel ? ` (${sourceLabel})` : ''}.`;
+    this.setSaveState('idle', label);
+  }
+  private describeCameraPreset(): string {
+    switch (this.cameraPreset) {
+      case 'front':
+        return 'Front elevation view';
+      case 'side':
+        return 'Side elevation view';
+      default:
+        return 'Perspective orbit view';
+    }
+  }
+  private setLightingPreset(preset: LightingPreset, sourceLabel?: string): void {
+    if (this.lightingPreset === preset) {
+      const description = this.describeLightingPreset(preset);
+      this.setSaveState('idle', `${description}${sourceLabel ? ` (${sourceLabel})` : ''}.`);
+      return;
+    }
+    this.lightingPreset = preset;
+    if (this.viewPort === '3d') {
+      this.scheduleFrame();
+    }
+    const description = this.describeLightingPreset(preset);
+    this.setSaveState('idle', `${description}${sourceLabel ? ` (${sourceLabel})` : ''}.`);
+  }
+  private describeLightingPreset(preset: LightingPreset): string {
+    switch (preset) {
+      case 'lit':
+        return 'Lit shading preset';
+      case 'unlit':
+        return 'Unlit preview preset';
+      case 'wireframe':
+        return 'Wireframe preview preset';
+      case 'detail':
+        return 'Detailed shading preset';
+      default:
+        return 'Lighting preset';
+    }
   }
 
   // Pointer events
@@ -213,6 +319,19 @@ export class DesignStudioPage implements OnInit, OnDestroy {
     }
     if(this.mode==='select'){
       const p = this.resolveGenericPoint(raw);
+      const roomHit = this.pickRoomAtPoint(p);
+      if (roomHit) {
+        this.selectedRoomId = roomHit.id;
+        this.selectedWallId = null;
+        this.selectedWallPoint = null;
+        this.selectedWallT = null;
+        this.setSaveState(
+          'idle',
+          `Room ${this.formatLength(roomHit.w)} × ${this.formatLength(roomHit.h)} selected.`
+        );
+        this.focusSelection('pan');
+        return;
+      }
       const hit = this.pickWallAtPoint(p, 30);
       if(hit){
         this.selectedWallId = hit.wall.id;
@@ -220,11 +339,10 @@ export class DesignStudioPage implements OnInit, OnDestroy {
         this.selectedWallPoint = hit.proj;
         this.selectedRoomId = null;
         this.setSaveState('idle', `Wall length: ${this.formatLength(this.segLen(hit.wall.a, hit.wall.b))}`);
+        this.focusSelection('pan');
       } else {
-        this.selectedWallId = null;
-        this.selectedWallPoint = null;
-        this.selectedWallT = null;
-        this.setSaveState('idle', 'Select a wall or switch tools to keep drafting.');
+        this.clearSelection();
+        this.setSaveState('idle', 'Select a wall or room, or switch tools to keep drafting.');
       }
       return;
     }
@@ -363,54 +481,121 @@ export class DesignStudioPage implements OnInit, OnDestroy {
     }
     this.dragging = null;
   }
-  onWheel(e: WheelEvent){ e.preventDefault(); const factor = e.deltaY < 0 ? 1/1.1 : 1.1; this.zoom(factor); }
-  zoom(f: number){ const cx = this.minX + this.width/2; const cy = this.minY + this.height/2; this.width *= f; this.height *= f; this.minX = cx - this.width/2; this.minY = cy - this.height/2; this.scale = 2000 / this.width; }
-  resetView(){
-    this.minX = this.defaultViewBox.minX;
-    this.minY = this.defaultViewBox.minY;
-    this.width = this.defaultViewBox.width;
-    this.height = this.defaultViewBox.height;
-    this.scale = 1;
-  }
-  fitToContent(): void {
-    const points: Point[] = [];
-    for (const wall of this.walls) {
-      points.push(wall.a, wall.b);
-    }
-    for (const room of this.rooms) {
-      points.push(
-        { x: room.x, y: room.y },
-        { x: room.x + room.w, y: room.y },
-        { x: room.x, y: room.y + room.h },
-        { x: room.x + room.w, y: room.y + room.h }
-      );
-    }
-    if (points.length === 0) {
-      this.resetView();
+  @HostListener('window:keydown', ['$event'])
+  handleGlobalShortcut(event: KeyboardEvent): void {
+    if (event.defaultPrevented) {
       return;
     }
-    let minX = Number.POSITIVE_INFINITY;
-    let minY = Number.POSITIVE_INFINITY;
-    let maxX = Number.NEGATIVE_INFINITY;
-    let maxY = Number.NEGATIVE_INFINITY;
-    for (const p of points) {
-      if (p.x < minX) { minX = p.x; }
-      if (p.y < minY) { minY = p.y; }
-      if (p.x > maxX) { maxX = p.x; }
-      if (p.y > maxY) { maxY = p.y; }
+    const key = event.key.toLowerCase();
+    const target = event.target as HTMLElement | null;
+    const isEditableTarget =
+      target &&
+      (target.tagName === 'INPUT' ||
+        target.tagName === 'TEXTAREA' ||
+        target.tagName === 'SELECT' ||
+        target.isContentEditable);
+    if (!event.altKey && isEditableTarget) {
+      return;
     }
-    if (!Number.isFinite(minX) || !Number.isFinite(minY) || !Number.isFinite(maxX) || !Number.isFinite(maxY)) {
+    if (event.altKey && !event.ctrlKey && !event.metaKey) {
+      if (['1', '2', '3', '4'].includes(key)) {
+        event.preventDefault();
+        const preset: Record<string, LightingPreset> = {
+          '1': 'lit',
+          '2': 'unlit',
+          '3': 'wireframe',
+          '4': 'detail'
+        };
+        const sourceLabel = `Alt+${event.key.toUpperCase()}`;
+        this.setLightingPreset(preset[key], sourceLabel);
+        return;
+      }
+      if (key === 'g') {
+        event.preventDefault();
+        this.setCameraPreset('perspective', 'Alt+G');
+        return;
+      }
+      if (key === 'j') {
+        event.preventDefault();
+        this.viewPort = '2d';
+        this.cameraPreset = 'perspective';
+        this.autoOrbit = true;
+        this.cam.pitch = -0.6;
+        this.cam.yaw = Math.PI / 4;
+        this.setSaveState('idle', 'Top view (Alt+J).');
+        return;
+      }
+      if (key === 'h') {
+        event.preventDefault();
+        this.setCameraPreset('front', 'Alt+H');
+        return;
+      }
+      if (key === 'k') {
+        event.preventDefault();
+        this.setCameraPreset('side', 'Alt+K');
+        return;
+      }
+      return;
+    }
+    if (event.ctrlKey || event.metaKey || event.shiftKey) {
+      return;
+    }
+    switch (key) {
+      case 'q':
+        event.preventDefault();
+        this.activateModeShortcut('select', 'Selection tool (Q).');
+        break;
+      case 'w':
+        event.preventDefault();
+        this.activateModeShortcut('pan', 'Pan / move viewport (W).');
+        break;
+      case 'e':
+        event.preventDefault();
+        this.activateModeShortcut('wall', 'Wall tool (E).');
+        break;
+      case 'r':
+        event.preventDefault();
+        this.activateModeShortcut('room', 'Room tool (R).');
+        break;
+      default:
+        break;
+    }
+  }
+  onWheel(e: WheelEvent){ e.preventDefault(); const factor = e.deltaY < 0 ? 1/1.1 : 1.1; this.zoom(factor); }
+  zoom(f: number){
+    if (f <= 0) {
+      return;
+    }
+    this.cancelViewportAnimation();
+    const cx = this.minX + this.width / 2;
+    const cy = this.minY + this.height / 2;
+    const width = this.width * f;
+    const height = this.height * f;
+    this.applyViewport({
+      minX: cx - width / 2,
+      minY: cy - height / 2,
+      width,
+      height
+    });
+  }
+  resetView(){
+    this.animateViewport({
+      minX: this.defaultViewBox.minX,
+      minY: this.defaultViewBox.minY,
+      width: this.defaultViewBox.width,
+      height: this.defaultViewBox.height
+    }, 300);
+  }
+  fitToContent(): void {
+    const bounds = this.contentBounds();
+    if (!bounds) {
       this.resetView();
       return;
     }
     const padding = Math.max(this.gridSpacing * 2, 200);
-    const width = Math.max(maxX - minX, 400);
-    const height = Math.max(maxY - minY, 400);
-    this.minX = minX - padding;
-    this.minY = minY - padding;
-    this.width = width + padding * 2;
-    this.height = height + padding * 2;
-    this.scale = 2000 / this.width;
+    const minSize = Math.max(this.minViewportDimension, 400);
+    const target = this.expandBounds(bounds, padding, minSize);
+    this.animateViewport(target, 360);
   }
 
   updateGridSpacing(value: number | string): void {
@@ -549,6 +734,42 @@ export class DesignStudioPage implements OnInit, OnDestroy {
       y: Math.round(p.y / spacing) * spacing
     };
   }
+  private currentViewBounds(padding = 0): Bounds {
+    const pad = Math.max(0, padding);
+    return {
+      minX: this.minX - pad,
+      minY: this.minY - pad,
+      maxX: this.minX + this.width + pad,
+      maxY: this.minY + this.height + pad
+    };
+  }
+  private wallBounds(w: Wall): Bounds {
+    const half = Math.max(80, w.thickness / 2 + 40);
+    const minX = Math.min(w.a.x, w.b.x) - half;
+    const minY = Math.min(w.a.y, w.b.y) - half;
+    const maxX = Math.max(w.a.x, w.b.x) + half;
+    const maxY = Math.max(w.a.y, w.b.y) + half;
+    return { minX, minY, maxX, maxY };
+  }
+  private roomBounds(room: Room): Bounds {
+    return {
+      minX: room.x,
+      minY: room.y,
+      maxX: room.x + room.w,
+      maxY: room.y + room.h
+    };
+  }
+  private measurementBounds(segment: MeasurementSegment): Bounds {
+    return {
+      minX: Math.min(segment.a.x, segment.b.x),
+      minY: Math.min(segment.a.y, segment.b.y),
+      maxX: Math.max(segment.a.x, segment.b.x),
+      maxY: Math.max(segment.a.y, segment.b.y)
+    };
+  }
+  private boundsIntersect(a: Bounds, b: Bounds): boolean {
+    return !(a.maxX < b.minX || a.minX > b.maxX || a.maxY < b.minY || a.minY > b.maxY);
+  }
 
   private resolveWallPoint(raw: Point): Point {
     const origin = this.wallPath.length > 0 ? this.wallPath[this.wallPath.length - 1] : this.draftA;
@@ -636,6 +857,18 @@ export class DesignStudioPage implements OnInit, OnDestroy {
     return { x: dx/len, y: dy/len };
   }
   private uid(){ return Math.random().toString(36).slice(2,9); }
+  private pickRoomAtPoint(point: Point): Room | null {
+    const margin = Math.max(10, this.gridSpacing * 0.1);
+    for (let i = this.rooms.length - 1; i >= 0; i--) {
+      const room = this.rooms[i];
+      const withinX = point.x >= room.x - margin && point.x <= room.x + room.w + margin;
+      const withinY = point.y >= room.y - margin && point.y <= room.y + room.h + margin;
+      if (withinX && withinY) {
+        return room;
+      }
+    }
+    return null;
+  }
   private pickWallAtPoint(p:Point, thresh=30){
     let best: { wall: Wall; t:number; dist:number; proj: Point }|null=null;
     for(const w of this.walls){
@@ -667,9 +900,49 @@ export class DesignStudioPage implements OnInit, OnDestroy {
     return Array.from(nodes.values());
   }
   get wallHandlesList(){ return this.wallNodeIndex(); }
+  get visibleWallHandlesList(){
+    const view = this.currentViewBounds(this.gridSpacing * 4);
+    const keepSelected = this.selectedWallId;
+    return this.wallNodeIndex().filter(node => {
+      if (keepSelected && node.anchors.some(anchor => anchor.wall.id === keepSelected)) {
+        return true;
+      }
+      const p = node.point;
+      return p.x >= view.minX && p.x <= view.maxX && p.y >= view.minY && p.y <= view.maxY;
+    });
+  }
+  get visibleWalls(): Wall[] {
+    const view = this.currentViewBounds(this.gridSpacing * 4);
+    return this.walls.filter(w => {
+      if (this.selectedWallId === w.id) {
+        return true;
+      }
+      return this.boundsIntersect(this.wallBounds(w), view);
+    });
+  }
+  get visibleRooms(): Room[] {
+    const view = this.currentViewBounds(this.gridSpacing * 4);
+    return this.rooms.filter(room => {
+      if (this.selectedRoomId === room.id) {
+        return true;
+      }
+      return this.boundsIntersect(this.roomBounds(room), view);
+    });
+  }
+  get visibleMeasurements(): MeasurementSegment[] {
+    const view = this.currentViewBounds(this.gridSpacing * 3);
+    return this.measurements.filter(segment => this.boundsIntersect(this.measurementBounds(segment), view));
+  }
   get selectedWall(): Wall | null {
     if(!this.selectedWallId) return null;
     return this.walls.find(w=>w.id===this.selectedWallId) ?? null;
+  }
+  get selectedRoom(): Room | null {
+    if (!this.selectedRoomId) return null;
+    return this.rooms.find(r => r.id === this.selectedRoomId) ?? null;
+  }
+  get hasSelection(): boolean {
+    return Boolean(this.selectedWallId || this.selectedRoomId);
   }
   wallTooltipStyle(){
     if(!this.selectedWallPoint){ return { display: 'none' }; }
@@ -690,6 +963,214 @@ export class DesignStudioPage implements OnInit, OnDestroy {
       x: wall.a.x + (wall.b.x - wall.a.x) * t,
       y: wall.a.y + (wall.b.y - wall.a.y) * t
     };
+  }
+  private selectionBounds(): Bounds | null {
+    const wall = this.selectedWall;
+    if (wall) {
+      const half = wall.thickness / 2;
+      const minX = Math.min(wall.a.x, wall.b.x) - half;
+      const minY = Math.min(wall.a.y, wall.b.y) - half;
+      const maxX = Math.max(wall.a.x, wall.b.x) + half;
+      const maxY = Math.max(wall.a.y, wall.b.y) + half;
+      return { minX, minY, maxX, maxY };
+    }
+    const room = this.selectedRoom;
+    if (room) {
+      return {
+        minX: room.x,
+        minY: room.y,
+        maxX: room.x + room.w,
+        maxY: room.y + room.h
+      };
+    }
+    return null;
+  }
+  private contentBounds(): Bounds | null {
+    const points: Point[] = [];
+    for (const wall of this.walls) {
+      points.push(wall.a, wall.b);
+    }
+    for (const room of this.rooms) {
+      points.push(
+        { x: room.x, y: room.y },
+        { x: room.x + room.w, y: room.y },
+        { x: room.x, y: room.y + room.h },
+        { x: room.x + room.w, y: room.y + room.h }
+      );
+    }
+    return this.boundsFromPoints(points);
+  }
+  private boundsFromPoints(points: Point[]): Bounds | null {
+    if (!points.length) {
+      return null;
+    }
+    let minX = points[0].x;
+    let minY = points[0].y;
+    let maxX = points[0].x;
+    let maxY = points[0].y;
+    for (const point of points) {
+      if (point.x < minX) minX = point.x;
+      if (point.y < minY) minY = point.y;
+      if (point.x > maxX) maxX = point.x;
+      if (point.y > maxY) maxY = point.y;
+    }
+    return { minX, minY, maxX, maxY };
+  }
+  private expandBounds(bounds: Bounds, padding: number, minSize: number): ViewportBox {
+    const widthRaw = bounds.maxX - bounds.minX;
+    const heightRaw = bounds.maxY - bounds.minY;
+    let width = Math.max(widthRaw + padding * 2, minSize);
+    let height = Math.max(heightRaw + padding * 2, minSize);
+    const aspect = this.viewportAspectRatio();
+    if (aspect > 0 && height > 0) {
+      const current = width / height;
+      if (current < aspect) {
+        width = height * aspect;
+      } else if (current > aspect) {
+        height = width / aspect;
+      }
+    }
+    const centerX = (bounds.minX + bounds.maxX) / 2;
+    const centerY = (bounds.minY + bounds.maxY) / 2;
+    return {
+      minX: centerX - width / 2,
+      minY: centerY - height / 2,
+      width,
+      height
+    };
+  }
+  private viewportAspectRatio(): number {
+    const el = this.paneElement();
+    if (el && el.clientHeight > 0) {
+      return el.clientWidth / el.clientHeight;
+    }
+    return this.width / Math.max(this.height, 1);
+  }
+  private applyViewport(box: ViewportBox): void {
+    let { minX, minY, width, height } = box;
+    if (width < this.minViewportDimension) {
+      const centerX = minX + width / 2;
+      width = this.minViewportDimension;
+      minX = centerX - width / 2;
+    }
+    if (height < this.minViewportDimension) {
+      const centerY = minY + height / 2;
+      height = this.minViewportDimension;
+      minY = centerY - height / 2;
+    }
+    this.minX = minX;
+    this.minY = minY;
+    this.width = width;
+    this.height = height;
+    this.scale = 2000 / this.width;
+  }
+  private cancelViewportAnimation(): void {
+    const tween = this.viewportTween;
+    if (tween && tween.raf !== null && tween.raf !== undefined) {
+      cancelAnimationFrame(tween.raf);
+    }
+    this.viewportTween = null;
+  }
+  private animateViewport(to: ViewportBox, duration = 320): void {
+    const centerX = to.minX + to.width / 2;
+    const centerY = to.minY + to.height / 2;
+    const targetWidth = Math.max(to.width, this.minViewportDimension);
+    const targetHeight = Math.max(to.height, this.minViewportDimension);
+    const target: ViewportBox = {
+      minX: centerX - targetWidth / 2,
+      minY: centerY - targetHeight / 2,
+      width: targetWidth,
+      height: targetHeight
+    };
+    const from: ViewportBox = {
+      minX: this.minX,
+      minY: this.minY,
+      width: this.width,
+      height: this.height
+    };
+    const delta =
+      Math.abs(target.minX - from.minX) +
+      Math.abs(target.minY - from.minY) +
+      Math.abs(target.width - from.width) +
+      Math.abs(target.height - from.height);
+    this.cancelViewportAnimation();
+    if (duration <= 0 || delta < 0.1) {
+      this.applyViewport(target);
+      return;
+    }
+    const start = performance.now();
+    const tween: { raf: number | null; start: number; duration: number; from: ViewportBox; to: ViewportBox } = {
+      raf: null,
+      start,
+      duration,
+      from,
+      to: target
+    };
+    const step = (timestamp: number) => {
+      const elapsed = timestamp - start;
+      const progress = Math.min(1, elapsed / duration);
+      const eased = this.easeInOutQuad(progress);
+      const next: ViewportBox = {
+        minX: from.minX + (target.minX - from.minX) * eased,
+        minY: from.minY + (target.minY - from.minY) * eased,
+        width: from.width + (target.width - from.width) * eased,
+        height: from.height + (target.height - from.height) * eased
+      };
+      this.applyViewport(next);
+      if (progress < 1) {
+        tween.raf = requestAnimationFrame(step);
+        this.viewportTween = tween;
+      } else {
+        this.applyViewport(target);
+        this.viewportTween = null;
+      }
+    };
+    tween.raf = requestAnimationFrame(step);
+    this.viewportTween = tween;
+  }
+  private easeInOutQuad(t: number): number {
+    return t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2;
+  }
+  private focusSelection(mode: 'pan'|'zoom'): boolean {
+    const bounds = this.selectionBounds();
+    if (!bounds) {
+      return false;
+    }
+    if (mode === 'pan') {
+      const margin = Math.max(this.gridSpacing, 120);
+      const widthNeeded = bounds.maxX - bounds.minX + margin * 2;
+      const heightNeeded = bounds.maxY - bounds.minY + margin * 2;
+      if (widthNeeded > this.width || heightNeeded > this.height) {
+        return this.focusSelection('zoom');
+      }
+      const centerX = (bounds.minX + bounds.maxX) / 2;
+      const centerY = (bounds.minY + bounds.maxY) / 2;
+      const target: ViewportBox = {
+        minX: centerX - this.width / 2,
+        minY: centerY - this.height / 2,
+        width: this.width,
+        height: this.height
+      };
+      const shiftX = Math.abs(target.minX - this.minX);
+      const shiftY = Math.abs(target.minY - this.minY);
+      if (shiftX < 1 && shiftY < 1) {
+        return false;
+      }
+      this.animateViewport(target, 280);
+      return true;
+    }
+    const padding = Math.max(this.gridSpacing * 0.8, 120);
+    const minSize = Math.max(this.minViewportDimension, padding * 2);
+    const target = this.expandBounds(bounds, padding, minSize);
+    this.animateViewport(target, 360);
+    return true;
+  }
+  zoomSelection(): void {
+    if (this.focusSelection('zoom')) {
+      this.setSaveState('idle', 'Zoomed to selection.');
+    } else {
+      this.setSaveState('idle', 'Select a wall or room to zoom.');
+    }
   }
   private moveWallNode(point: Point, to: Point){
     const targetKey = this.pointKey(point);
@@ -1162,7 +1643,7 @@ export class DesignStudioPage implements OnInit, OnDestroy {
 
     const delta = this.lastFrame ? ts - this.lastFrame : 16;
     this.lastFrame = ts;
-    if (Number.isFinite(delta)) {
+    if (this.autoOrbit && Number.isFinite(delta)) {
       this.cam.yaw += delta * 0.00012;
     }
 
@@ -1189,7 +1670,11 @@ export class DesignStudioPage implements OnInit, OnDestroy {
     for (const measurement of this.measurements) {
       this.drawMeasurement3d(ctx, matrix, measurement, width, height, false);
     }
-    this.animationId = requestAnimationFrame(next => this.renderFrame(next));
+    if (this.autoOrbit) {
+      this.animationId = requestAnimationFrame(next => this.renderFrame(next));
+    } else {
+      this.animationId = null;
+    }
   }
 
   private computeCameraPosition(): { x: number; y: number; z: number } {
@@ -1302,7 +1787,70 @@ export class DesignStudioPage implements OnInit, OnDestroy {
     };
   }
 
+  private lightingPalette(): LightingPalette {
+    const base: LightingPalette = this.isDark
+      ? {
+          wallFill: 'rgba(59, 130, 246, 0.30)',
+          wallEdge: '#60a5fa',
+          wallEdgeWidth: 1,
+          roomFill: 'rgba(56, 189, 248, 0.35)',
+          roomEdge: '#38bdf8',
+          roomEdgeWidth: 1,
+          measurement: '#c084fc',
+          measurementDraft: '#a855f7'
+        }
+      : {
+          wallFill: 'rgba(59, 130, 246, 0.32)',
+          wallEdge: '#1d4ed8',
+          wallEdgeWidth: 1,
+          roomFill: 'rgba(191, 219, 254, 0.45)',
+          roomEdge: '#0284c7',
+          roomEdgeWidth: 1,
+          measurement: '#7c3aed',
+          measurementDraft: '#a855f7'
+        };
+    switch (this.lightingPreset) {
+      case 'unlit':
+        return {
+          ...base,
+          wallFill: this.isDark ? 'rgba(148, 163, 184, 0.35)' : 'rgba(148, 163, 184, 0.38)',
+          wallEdge: '#94a3b8',
+          roomFill: this.isDark ? 'rgba(165, 180, 252, 0.35)' : 'rgba(196, 210, 253, 0.40)',
+          roomEdge: '#a5b4fc',
+          measurement: this.isDark ? '#f8fafc' : '#334155',
+          measurementDraft: this.isDark ? '#cbd5f5' : '#94a3b8'
+        };
+      case 'wireframe':
+        return {
+          ...base,
+          wallFill: null,
+          roomFill: null,
+          wallEdge: this.isDark ? '#e2e8f0' : '#334155',
+          roomEdge: this.isDark ? '#cbd5f5' : '#475569',
+          wallEdgeWidth: 1.5,
+          roomEdgeWidth: 1.3,
+          measurement: this.isDark ? '#facc15' : '#0f172a',
+          measurementDraft: this.isDark ? '#fde68a' : '#94a3b8'
+        };
+      case 'detail':
+        return {
+          ...base,
+          wallFill: this.isDark ? 'rgba(29, 78, 216, 0.55)' : 'rgba(29, 78, 216, 0.45)',
+          wallEdge: this.isDark ? '#bfdbfe' : '#1d4ed8',
+          wallEdgeWidth: 1.2,
+          roomFill: this.isDark ? 'rgba(15, 118, 110, 0.45)' : 'rgba(34, 197, 94, 0.40)',
+          roomEdge: this.isDark ? '#5eead4' : '#047857',
+          roomEdgeWidth: 1.2,
+          measurement: this.isDark ? '#f59e0b' : '#ea580c',
+          measurementDraft: this.isDark ? '#fbbf24' : '#fb923c'
+        };
+      default:
+        return base;
+    }
+  }
+
   private drawWallFace(ctx: CanvasRenderingContext2D, matrix: number[], face: WallFace, width: number, height: number): void {
+    const palette = this.lightingPalette();
     const base = face.corners.map(c => this.transformPoint(matrix, { x: c.x, y: c.y, z: 0 }, width, height));
     const top = face.corners.map(c => this.transformPoint(matrix, { x: c.x, y: c.y, z: this.wallHeight }, width, height));
     if (!this.areProjected(base) || !this.areProjected(top)) {
@@ -1310,18 +1858,19 @@ export class DesignStudioPage implements OnInit, OnDestroy {
     }
     const basePts = base;
     const topPts = top;
-    const color = this.isDark ? 'rgba(96, 165, 250, 0.25)' : 'rgba(59, 130, 246, 0.30)';
-    ctx.fillStyle = color;
-    ctx.beginPath();
-    ctx.moveTo(topPts[0].x, topPts[0].y);
-    for (let i = 1; i < topPts.length; i++) {
-      ctx.lineTo(topPts[i].x, topPts[i].y);
+    if (palette.wallFill) {
+      ctx.fillStyle = palette.wallFill;
+      ctx.beginPath();
+      ctx.moveTo(topPts[0].x, topPts[0].y);
+      for (let i = 1; i < topPts.length; i++) {
+        ctx.lineTo(topPts[i].x, topPts[i].y);
+      }
+      ctx.closePath();
+      ctx.fill();
     }
-    ctx.closePath();
-    ctx.fill();
 
-    ctx.strokeStyle = this.isDark ? '#1d4ed8' : '#1d4ed8';
-    ctx.lineWidth = 1;
+    ctx.strokeStyle = palette.wallEdge;
+    ctx.lineWidth = palette.wallEdgeWidth;
     ctx.beginPath();
     ctx.moveTo(topPts[0].x, topPts[0].y);
     for (let i = 1; i < topPts.length; i++) {
@@ -1333,6 +1882,8 @@ export class DesignStudioPage implements OnInit, OnDestroy {
     for (let i = 0; i < topPts.length; i++) {
       const t = topPts[i];
       const b = basePts[i];
+      ctx.strokeStyle = palette.wallEdge;
+      ctx.lineWidth = palette.wallEdgeWidth;
       ctx.beginPath();
       ctx.moveTo(b.x, b.y);
       ctx.lineTo(t.x, t.y);
@@ -1341,9 +1892,8 @@ export class DesignStudioPage implements OnInit, OnDestroy {
   }
 
   private drawRoomMesh(ctx: CanvasRenderingContext2D, matrix: number[], mesh: RoomMesh, width: number, height: number): void {
-    ctx.fillStyle = this.isDark ? 'rgba(56, 189, 248, 0.25)' : 'rgba(191, 219, 254, 0.45)';
-    ctx.strokeStyle = this.isDark ? '#0ea5e9' : '#0284c7';
-    ctx.lineWidth = 1;
+    const palette = this.lightingPalette();
+    const allowFill = Boolean(palette.roomFill);
     for (const face of mesh.faces) {
       const projected = face.map(corner => this.transformPoint(matrix, { x: corner.x, y: corner.y, z: 0 }, width, height));
       if (!this.areProjected(projected)) {
@@ -1355,7 +1905,12 @@ export class DesignStudioPage implements OnInit, OnDestroy {
         ctx.lineTo(projected[i].x, projected[i].y);
       }
       ctx.closePath();
-      ctx.fill();
+      if (allowFill && palette.roomFill) {
+        ctx.fillStyle = palette.roomFill;
+        ctx.fill();
+      }
+      ctx.strokeStyle = palette.roomEdge;
+      ctx.lineWidth = palette.roomEdgeWidth;
       ctx.stroke();
     }
   }
@@ -1368,6 +1923,7 @@ export class DesignStudioPage implements OnInit, OnDestroy {
     height: number,
     isDraft: boolean
   ): void {
+    const palette = this.lightingPalette();
     const baseHeight = isDraft ? 120 : 80;
     const a = this.transformPoint(matrix, { x: measurement.a.x, y: measurement.a.y, z: baseHeight }, width, height);
     const b = this.transformPoint(matrix, { x: measurement.b.x, y: measurement.b.y, z: baseHeight }, width, height);
@@ -1375,14 +1931,14 @@ export class DesignStudioPage implements OnInit, OnDestroy {
       return;
     }
     ctx.setLineDash(isDraft ? [4, 4] : [8, 6]);
-    ctx.strokeStyle = '#7c3aed';
+    ctx.strokeStyle = isDraft ? palette.measurementDraft : palette.measurement;
     ctx.lineWidth = isDraft ? 1 : 2;
     ctx.beginPath();
     ctx.moveTo(a.x, a.y);
     ctx.lineTo(b.x, b.y);
     ctx.stroke();
     ctx.setLineDash([]);
-    ctx.fillStyle = '#7c3aed';
+    ctx.fillStyle = isDraft ? palette.measurementDraft : palette.measurement;
     ctx.font = '12px "Inter", system-ui, sans-serif';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
