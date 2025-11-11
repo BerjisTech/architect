@@ -248,19 +248,19 @@ Build a comprehensive real estate and construction platform at architect.berjis.
   - [x] Proper wall joining at corners (mitered, butted, rounded)
 
 #### 5.2.3 Wall Selection & Manipulation
-- [ ] Implement wall selection:
-  - Click to select individual wall segment
-  - Ctrl+Click for multi-selection
-  - Shift+Click for range selection
-  - Selection highlight (different color/thickness)
-  - Selection bounding box
-  - Display wall properties on selection
+- [x] Implement wall selection:
+  - [x] Click to select individual wall segment
+  - [x] Ctrl+Click for multi-selection
+  - [x] Shift+Click for range selection
+  - [x] Selection highlight (different color/thickness)
+  - [x] Selection bounding box
+  - [x] Display wall properties on selection
 - [ ] Create wall editing tools:
   - Drag endpoints to resize wall
   - Drag wall body to move entire wall
   - Snap to other walls while dragging
   - Maintain intersections when moving walls
-  - Show dimension guides while moving
+  - [x] Show dimension guides while moving
 - [ ] Implement wall deletion:
   - Delete key or right-click context menu
   - Automatic cleanup of orphaned elements (doors/windows)

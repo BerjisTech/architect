@@ -248,6 +248,17 @@
                 </ng-container>
               </g>
             </g>
+            <ng-container *ngIf="selectedWallIds.length > 0 && selectionBounds() as selBounds">
+              <rect [attr.x]="selBounds.minX"
+                    [attr.y]="selBounds.minY"
+                    [attr.width]="selBounds.maxX - selBounds.minX"
+                    [attr.height]="selBounds.maxY - selBounds.minY"
+                    fill="none"
+                    stroke="#38bdf8"
+                    stroke-width="2"
+                    stroke-dasharray="10 6"
+                    pointer-events="none"></rect>
+            </ng-container>
             <g *ngIf="cornerJoinOverlays.length" pointer-events="none">
               <path *ngFor="let join of cornerJoinOverlays"
                     [attr.d]="join.path"
@@ -269,6 +280,29 @@
                   {{ angle.text }}
                 </text>
               </g>
+            </g>
+            <g *ngIf="draggingMeasurements.length" stroke="#0ea5e9" stroke-width="2" stroke-dasharray="8 6" fill="none" pointer-events="none">
+              <g *ngFor="let segment of draggingMeasurements">
+                <line [attr.x1]="segment.a.x" [attr.y1]="segment.a.y" [attr.x2]="segment.b.x" [attr.y2]="segment.b.y"></line>
+                <ng-container *ngIf="measurementMidpoint(segment) as mid">
+                  <text [attr.x]="mid.x" [attr.y]="mid.y - 12" text-anchor="middle" font-size="14"
+                        fill="#0ea5e9" stroke="#ffffff" stroke-width="4" stroke-linejoin="round" paint-order="stroke">
+                    {{ formatLength(segment.length) }}
+                  </text>
+                  <text [attr.x]="mid.x" [attr.y]="mid.y - 12" text-anchor="middle" font-size="14" fill="#0ea5e9">
+                    {{ formatLength(segment.length) }}
+                  </text>
+                </ng-container>
+              </g>
+            </g>
+            <g *ngIf="draggingDeltaLabel as delta" pointer-events="none">
+              <text [attr.x]="delta.position.x" [attr.y]="delta.position.y" font-size="13"
+                    fill="#0f172a" stroke="#ffffff" stroke-width="4" stroke-linejoin="round" paint-order="stroke">
+                {{ delta.text }}
+              </text>
+              <text [attr.x]="delta.position.x" [attr.y]="delta.position.y" font-size="13" fill="#0f172a">
+                {{ delta.text }}
+              </text>
             </g>
             <!-- Draft preview -->
             <g *ngIf="creating && draftA && draftB">
@@ -343,17 +377,20 @@
                 <button type="button" class="material-symbols-outlined text-xs text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-white"
                         (click)="selectedWallId=null; selectedWallPoint=null; selectedWallT=null">close</button>
               </div>
+              <div *ngIf="selectedWallIds.length > 1" class="rounded-lg bg-blue-50/80 px-3 py-2 text-slate-600 dark:bg-slate-800/70 dark:text-slate-200">
+                {{ selectedWallIds.length }} walls selected · total length {{ formatLength(totalSelectedWallLength) }}
+              </div>
               <div class="flex items-center justify-between">
                 <span>Length</span>
                 <span class="font-semibold text-slate-900 dark:text-white">{{ formatLength(wallLengthMm(wall)) }}</span>
               </div>
               <div class="grid grid-cols-2 gap-2">
-                <button type="button" class="btn-ghost px-2 py-1 text-left" (click)="adjustSelectedWall('start', lengthDelta)">Extend start +</button>
-                <button type="button" class="btn-ghost px-2 py-1 text-left" (click)="adjustSelectedWall('start', -lengthDelta)">Shrink start -</button>
-                <button type="button" class="btn-ghost px-2 py-1 text-left" (click)="adjustSelectedWall('end', lengthDelta)">Extend end +</button>
-                <button type="button" class="btn-ghost px-2 py-1 text-left" (click)="adjustSelectedWall('end', -lengthDelta)">Shrink end -</button>
-                <button type="button" class="btn-ghost px-2 py-1 text-left" (click)="adjustSelectedWall('both', lengthDelta)">Extend both +</button>
-                <button type="button" class="btn-ghost px-2 py-1 text-left" (click)="adjustSelectedWall('both', -lengthDelta)">Shrink both -</button>
+                <button type="button" class="btn-ghost px-2 py-1 text-left" [disabled]="selectedWallIds.length !== 1" (click)="adjustSelectedWall('start', lengthDelta)">Extend start +</button>
+                <button type="button" class="btn-ghost px-2 py-1 text-left" [disabled]="selectedWallIds.length !== 1" (click)="adjustSelectedWall('start', -lengthDelta)">Shrink start -</button>
+                <button type="button" class="btn-ghost px-2 py-1 text-left" [disabled]="selectedWallIds.length !== 1" (click)="adjustSelectedWall('end', lengthDelta)">Extend end +</button>
+                <button type="button" class="btn-ghost px-2 py-1 text-left" [disabled]="selectedWallIds.length !== 1" (click)="adjustSelectedWall('end', -lengthDelta)">Shrink end -</button>
+                <button type="button" class="btn-ghost px-2 py-1 text-left" [disabled]="selectedWallIds.length !== 1" (click)="adjustSelectedWall('both', lengthDelta)">Extend both +</button>
+                <button type="button" class="btn-ghost px-2 py-1 text-left" [disabled]="selectedWallIds.length !== 1" (click)="adjustSelectedWall('both', -lengthDelta)">Shrink both -</button>
               </div>
               <label class="flex items-center justify-between gap-2">
                 <span>Step (mm)</span>
@@ -361,9 +398,9 @@
                        [ngModel]="lengthDelta" (ngModelChange)="lengthDelta = Math.max(10, +$event || 10)" min="10" step="10" />
               </label>
               <div class="grid grid-cols-2 gap-2">
-                <button type="button" class="btn-ghost px-2 py-1 text-left" (click)="branchFromSelectedWall()">Branch from here</button>
-                <button type="button" class="btn-ghost px-2 py-1 text-left" (click)="splitSelectedWall()">Split at point</button>
-                <button type="button" class="btn-ghost px-2 py-1 text-left" (click)="curveSelectedWall()">Curve (add midpoint)</button>
+                <button type="button" class="btn-ghost px-2 py-1 text-left" [disabled]="selectedWallIds.length !== 1" (click)="branchFromSelectedWall()">Branch from here</button>
+                <button type="button" class="btn-ghost px-2 py-1 text-left" [disabled]="selectedWallIds.length !== 1" (click)="splitSelectedWall()">Split at point</button>
+                <button type="button" class="btn-ghost px-2 py-1 text-left" [disabled]="selectedWallIds.length !== 1" (click)="curveSelectedWall()">Curve (add midpoint)</button>
                 <button type="button" class="btn-ghost px-2 py-1 text-left text-rose-600 hover:text-rose-800" (click)="deleteSelectedWall()">Delete wall</button>
               </div>
             </div>
