@@ -19,6 +19,7 @@ type RoomMesh = { id: string; faces: [Point, Point, Point, Point][] };
 type ViewportBox = { minX: number; minY: number; width: number; height: number };
 type Bounds = { minX: number; minY: number; maxX: number; maxY: number };
 type LightingPreset = 'lit' | 'unlit' | 'wireframe' | 'detail';
+type GuideOverlay = { start: Point; end: Point; mode: 'parallel'|'perpendicular' };
 type LightingPalette = {
   wallFill: string | null;
   wallEdge: string;
@@ -28,6 +29,18 @@ type LightingPalette = {
   roomEdgeWidth: number;
   measurement: string;
   measurementDraft: string;
+};
+type CornerAngleLabel = { id: string; cx: number; cy: number; x: number; y: number; text: string; path: string | null };
+type CornerJoinOverlay = { id: string; path: string; fill: string; stroke?: string; strokeWidth?: number };
+type WallNodeDirection = {
+  dir: Point;
+  angle: number;
+  left: Point;
+  right: Point;
+  half: number;
+  length: number;
+  wall: Wall;
+  end: 'a'|'b';
 };
 
 @Component({
@@ -51,6 +64,7 @@ export class DesignStudioPage implements OnInit, OnDestroy {
     this._viewPort = value;
     if (value === '3d') {
       this.lastFrame = performance.now();
+      this.invalidate3dCache();
       this.scheduleFrame();
     } else if (this.animationId !== null) {
       cancelAnimationFrame(this.animationId);
@@ -62,6 +76,7 @@ export class DesignStudioPage implements OnInit, OnDestroy {
   lockLabels = false;
   lockFurniture = false;
   angleSnap = true;
+  wallJoinStyle: 'butt'|'miter'|'round' = 'miter';
   readonly defaultViewBox = { minX: -1000, minY: -800, width: 2000, height: 1600 };
   private readonly defaultGridSpacing = 100;
   private readonly defaultGridMajorEvery = 5;
@@ -88,11 +103,16 @@ export class DesignStudioPage implements OnInit, OnDestroy {
   dragging: null
     | { kind: 'wall-node'; anchors: WallDragAnchor[] }
     | { kind: 'room-corner'; roomId: string; corner: 'nw'|'ne'|'sw'|'se' } = null;
+  private draggingMoved = false;
   // tool properties
   wallThickness = 200; // mm world units
   wallHeight = 3000;   // mm
   openingWidth = 900;  // mm
   lengthDelta = 200;
+  private readonly wallMinLength = 400;
+  private readonly wallMaxLength = 25000;
+  private readonly guideThresholdCos = Math.cos(6 * Math.PI / 180);
+  private readonly intersectionEpsilon = 0.002;
 
   // Viewport (world units)
   minX = this.defaultViewBox.minX; minY = this.defaultViewBox.minY;
@@ -120,6 +140,12 @@ export class DesignStudioPage implements OnInit, OnDestroy {
   private cameraPreset: 'perspective'|'front'|'side' = 'perspective';
   private autoOrbit = true;
   private cam = { yaw: 0, pitch: -0.6, distance: 4500 };
+  private dirty3d = true;
+  private renderCache: ImageData | null = null;
+  private renderCacheSize = { width: 0, height: 0 };
+  guideOverlay: GuideOverlay | null = null;
+  pendingIntersection: Point | null = null;
+  private constraintMessage: string | null = null;
 
   private qpSub?: Subscription;
   private statusTimer: ReturnType<typeof setTimeout> | null = null;
@@ -181,10 +207,21 @@ export class DesignStudioPage implements OnInit, OnDestroy {
     }
   }
   toggleTheme() { this.setTheme(this.isDark ? 'light' : 'dark'); }
+  setWallJoinStyle(style: 'butt'|'miter'|'round'): void {
+    if (this.wallJoinStyle === style) {
+      return;
+    }
+    this.wallJoinStyle = style;
+    this.invalidate3dCache();
+  }
   private setTheme(mode: 'light' | 'dark') {
     this.isDark = mode === 'dark';
     document.documentElement.classList.toggle('dark', mode === 'dark');
     try { localStorage.setItem('theme', mode); } catch {}
+    this.invalidate3dCache();
+    if (this.viewPort === '3d') {
+      this.scheduleFrame();
+    }
   }
 
   viewBox() { return `${this.minX} ${this.minY} ${this.width} ${this.height}`; }
@@ -197,8 +234,16 @@ export class DesignStudioPage implements OnInit, OnDestroy {
     this.wallPath=[];
     this.clearSelection();
     this.dragging=null;
+    this.draggingMoved = false;
     this.roomMeshes = [];
     this.wallFaces = [];
+    this.invalidate3dCache();
+    this.guideOverlay = null;
+    this.pendingIntersection = null;
+    this.constraintMessage = null;
+    if (this.viewPort === '3d') {
+      this.scheduleFrame();
+    }
   }
   private clearSelection(): void {
     this.selectedWallId = null;
@@ -214,6 +259,13 @@ export class DesignStudioPage implements OnInit, OnDestroy {
     this.draftA = null;
     this.draftB = null;
     this.wallPath = [];
+    this.guideOverlay = null;
+    this.pendingIntersection = null;
+  }
+  private invalidate3dCache(): void {
+    this.dirty3d = true;
+    this.renderCache = null;
+    this.renderCacheSize = { width: 0, height: 0 };
   }
   private activateModeShortcut(mode: this['mode'], message: string): void {
     if (mode === 'measure') {
@@ -228,6 +280,9 @@ export class DesignStudioPage implements OnInit, OnDestroy {
       this.cancelDraft();
     }
     this.mode = mode;
+    if (mode !== 'wall') {
+      this.guideOverlay = null;
+    }
     this.setSaveState('idle', message);
   }
   private setCameraPreset(preset: 'perspective'|'front'|'side', sourceLabel?: string): void {
@@ -245,6 +300,7 @@ export class DesignStudioPage implements OnInit, OnDestroy {
       this.cam.yaw = preset === 'front' ? Math.PI / 2 : 0;
     }
     this.lastFrame = performance.now();
+    this.invalidate3dCache();
     if (this.viewPort !== '3d') {
       this.viewPort = '3d';
     } else if (previousView === '3d') {
@@ -270,6 +326,7 @@ export class DesignStudioPage implements OnInit, OnDestroy {
       return;
     }
     this.lightingPreset = preset;
+    this.invalidate3dCache();
     if (this.viewPort === '3d') {
       this.scheduleFrame();
     }
@@ -294,12 +351,17 @@ export class DesignStudioPage implements OnInit, OnDestroy {
   // Pointer events
   onSvgClick(e: MouseEvent){
     const raw = this.toWorld(e);
+    if (this.mode !== 'wall') {
+      this.guideOverlay = null;
+      this.pendingIntersection = null;
+    }
     if(this.mode==='measure'){
       const point = this.resolveGenericPoint(raw);
       if(!this.measureStart){
         this.measureStart = { ...point };
         this.measureDraft = { ...point };
         this.setSaveState('idle', 'Select a second point to measure distance.');
+        this.invalidate3dCache();
       } else {
         if(!this.samePoint(this.measureStart, point)){
           const length = this.segLen(this.measureStart, point);
@@ -311,6 +373,7 @@ export class DesignStudioPage implements OnInit, OnDestroy {
         }
         this.measureStart = null;
         this.measureDraft = null;
+        this.invalidate3dCache();
       }
       if (this.viewPort === '3d') {
         this.scheduleFrame();
@@ -354,6 +417,8 @@ export class DesignStudioPage implements OnInit, OnDestroy {
         this.wallPath = [start];
         this.draftA = start;
         this.draftB = start;
+        this.pendingIntersection = null;
+        this.clearConstraintMessage();
       } else {
         this.addWallSegment(p);
       }
@@ -401,7 +466,11 @@ export class DesignStudioPage implements OnInit, OnDestroy {
     // if select, attempt to start dragging handle
     if(this.mode==='select'){
       const h = this.hitHandle(p);
-      if(h){ this.dragging = h; return; }
+      if(h){
+        this.dragging = h;
+        this.draggingMoved = false;
+        return;
+      }
     }
   }
   onMouseMove(e: MouseEvent){
@@ -420,6 +489,7 @@ export class DesignStudioPage implements OnInit, OnDestroy {
     if(this.mode==='measure'){
       if(this.measureStart){
         this.measureDraft = this.resolveGenericPoint(raw);
+        this.invalidate3dCache();
         if (this.viewPort === '3d') {
           this.scheduleFrame();
         }
@@ -436,6 +506,10 @@ export class DesignStudioPage implements OnInit, OnDestroy {
         return;
       }
     }
+    if (this.mode !== 'wall') {
+      this.guideOverlay = null;
+      this.pendingIntersection = null;
+    }
     const p = this.resolveGenericPoint(raw);
     // dragging handles
     if(this.dragging){
@@ -445,6 +519,7 @@ export class DesignStudioPage implements OnInit, OnDestroy {
           anchor.point.y = p.y;
           anchor.wall[anchor.end] = anchor.point;
         });
+        this.draggingMoved = true;
         this.updateSelectedWallPoint();
       } else if(this.dragging.kind==='room-corner'){
         const d = this.dragging;
@@ -460,9 +535,12 @@ export class DesignStudioPage implements OnInit, OnDestroy {
   }
   onMouseUp(){
     if(this.panning){ this.panning = false; }
-    this.dragging = null;
+    this.finishDragGesture();
   }
-  @HostListener('window:mouseup') winUp(){ this.panning=false; this.dragging=null; }
+  @HostListener('window:mouseup') winUp(){
+    if(this.panning){ this.panning=false; }
+    this.finishDragGesture();
+  }
   @HostListener('window:keydown.escape') cancelGesture(){
     if(this.mode==='measure'){
       if(this.measureStart){
@@ -472,7 +550,9 @@ export class DesignStudioPage implements OnInit, OnDestroy {
       } else {
         this.toggleMeasureMode(false);
       }
+      this.invalidate3dCache();
       this.dragging = null;
+      this.draggingMoved = false;
       return;
     }
     if(this.creating){
@@ -480,6 +560,27 @@ export class DesignStudioPage implements OnInit, OnDestroy {
       else if(this.mode==='room'){ this.creating=false; this.draftA=null; this.draftB=null; }
     }
     this.dragging = null;
+    this.draggingMoved = false;
+    if (this.mode !== 'wall') {
+      this.guideOverlay = null;
+    }
+  }
+
+  private finishDragGesture(): void {
+    const drag = this.dragging;
+    const moved = this.draggingMoved;
+    if (!drag || drag.kind !== 'wall-node') {
+      this.dragging = null;
+      this.draggingMoved = false;
+      return;
+    }
+    const impactedWalls = drag.anchors.map(anchor => anchor.wall);
+    this.dragging = null;
+    this.draggingMoved = false;
+    if (!moved) {
+      return;
+    }
+    this.reconcileWallGeometry(impactedWalls);
   }
   @HostListener('window:keydown', ['$event'])
   handleGlobalShortcut(event: KeyboardEvent): void {
@@ -673,6 +774,54 @@ export class DesignStudioPage implements OnInit, OnDestroy {
     this.gridMajorEvery = this.defaultGridMajorEvery;
     this.gridOpacity = this.defaultGridOpacity;
   }
+  get lodDetail(): 'high'|'medium'|'low' {
+    const zoom = this.scale;
+    if (zoom >= 0.75) {
+      return 'high';
+    }
+    if (zoom >= 0.35) {
+      return 'medium';
+    }
+    return 'low';
+  }
+  get showWallOpenings(): boolean {
+    return this.lodDetail !== 'low';
+  }
+  get showWallHandles(): boolean {
+    return this.lodDetail !== 'low';
+  }
+  wallFillColor(w: Wall): string {
+    return this.selectedWallId === w.id ? '#2563eb' : '#111827';
+  }
+  wallOutlineStrokeColor(w: Wall): string {
+    return this.selectedWallId === w.id ? '#1d4ed8' : '#0f172a';
+  }
+  wallOutlineStrokeWidth(): number {
+    if (this.lodDetail === 'high') {
+      return 4;
+    }
+    if (this.lodDetail === 'medium') {
+      return 3;
+    }
+    return 2;
+  }
+  private announceConstraint(message: string, severity: 'warning'|'error'): void {
+    if (this.constraintMessage === message) {
+      return;
+    }
+    this.constraintMessage = message;
+    if (severity === 'error') {
+      this.setSaveState('error', message);
+    } else {
+      this.setSaveState('idle', message);
+    }
+  }
+  private clearConstraintMessage(): void {
+    if (this.constraintMessage === null) {
+      return;
+    }
+    this.constraintMessage = null;
+  }
 
   private finishWallDrawing(): void {
     this.rebuildMeshes();
@@ -680,6 +829,7 @@ export class DesignStudioPage implements OnInit, OnDestroy {
     this.draftA = null;
     this.draftB = null;
     this.wallPath = [];
+    this.guideOverlay = null;
   }
 
   private finishRoomDrawing(): void {
@@ -705,10 +855,14 @@ export class DesignStudioPage implements OnInit, OnDestroy {
     const newSegs = this.splitAgainstAllWalls(base);
     if(newSegs.length === 0){ return; }
     this.walls.push(...newSegs);
+    this.mergeNearbyNodes();
     const tail = newSegs[newSegs.length-1].b;
     this.wallPath.push(tail);
     this.draftA = tail;
     this.draftB = tail;
+    this.pendingIntersection = null;
+    this.guideOverlay = null;
+    this.clearConstraintMessage();
     this.rebuildMeshes();
   }
 
@@ -734,6 +888,47 @@ export class DesignStudioPage implements OnInit, OnDestroy {
       y: Math.round(p.y / spacing) * spacing
     };
   }
+  private applyDirectionalGuides(origin: Point, candidate: Point): { point: Point; guide: GuideOverlay | null } {
+    if (this.walls.length === 0) {
+      return { point: candidate, guide: null };
+    }
+    const baseVec = { x: candidate.x - origin.x, y: candidate.y - origin.y };
+    const baseLen = Math.hypot(baseVec.x, baseVec.y);
+    if (baseLen < 1) {
+      return { point: candidate, guide: null };
+    }
+    const vecNorm = { x: baseVec.x / baseLen, y: baseVec.y / baseLen };
+    let best: { mode: 'parallel'|'perpendicular'; dir: { x: number; y: number }; score: number; scalar: number } | null = null;
+    for (const wall of this.walls) {
+      const dir = this.unitVector(wall.a, wall.b);
+      const parallelDot = Math.abs(vecNorm.x * dir.x + vecNorm.y * dir.y);
+      if (parallelDot >= this.guideThresholdCos) {
+        const scalar = baseVec.x * dir.x + baseVec.y * dir.y;
+        if (!best || parallelDot > best.score) {
+          best = { mode: 'parallel', dir, score: parallelDot, scalar };
+        }
+      }
+      const perp = { x: -dir.y, y: dir.x };
+      const perpDot = Math.abs(vecNorm.x * perp.x + vecNorm.y * perp.y);
+      if (perpDot >= this.guideThresholdCos) {
+        const scalar = baseVec.x * perp.x + baseVec.y * perp.y;
+        if (!best || perpDot > best.score) {
+          best = { mode: 'perpendicular', dir: perp, score: perpDot, scalar };
+        }
+      }
+    }
+    if (!best) {
+      return { point: candidate, guide: null };
+    }
+    const snapped = {
+      x: origin.x + best.dir.x * best.scalar,
+      y: origin.y + best.dir.y * best.scalar
+    };
+    return {
+      point: snapped,
+      guide: { start: origin, end: snapped, mode: best.mode }
+    };
+  }
   private currentViewBounds(padding = 0): Bounds {
     const pad = Math.max(0, padding);
     return {
@@ -750,6 +945,62 @@ export class DesignStudioPage implements OnInit, OnDestroy {
     const maxX = Math.max(w.a.x, w.b.x) + half;
     const maxY = Math.max(w.a.y, w.b.y) + half;
     return { minX, minY, maxX, maxY };
+  }
+  private wallOutlineCorners(w: Wall): [Point, Point, Point, Point] {
+    const dir = this.unitVector(w.a, w.b);
+    const normal = { x: -dir.y, y: dir.x };
+    const half = w.thickness / 2;
+    const offsetX = normal.x * half;
+    const offsetY = normal.y * half;
+    return [
+      { x: w.a.x + offsetX, y: w.a.y + offsetY },
+      { x: w.b.x + offsetX, y: w.b.y + offsetY },
+      { x: w.b.x - offsetX, y: w.b.y - offsetY },
+      { x: w.a.x - offsetX, y: w.a.y - offsetY }
+    ];
+  }
+  wallOutlinePath(w: Wall): string {
+    const corners = this.wallOutlineCorners(w);
+    return `M ${corners[0].x} ${corners[0].y} L ${corners[1].x} ${corners[1].y} L ${corners[2].x} ${corners[2].y} L ${corners[3].x} ${corners[3].y} Z`;
+  }
+  private wallNodeDirections(node: { point: Point; anchors: WallDragAnchor[] }): WallNodeDirection[] {
+    const results: WallNodeDirection[] = [];
+    for (const anchor of node.anchors) {
+      const other = anchor.end === 'a' ? anchor.wall.b : anchor.wall.a;
+      const dx = other.x - node.point.x;
+      const dy = other.y - node.point.y;
+      const length = Math.hypot(dx, dy);
+      if (length < 1e-3) {
+        continue;
+      }
+      const dir = { x: dx / length, y: dy / length };
+      const angle = this.normalizeAngle(Math.atan2(dir.y, dir.x));
+      const half = anchor.wall.thickness / 2;
+      const left = {
+        x: node.point.x - dir.y * half,
+        y: node.point.y + dir.x * half
+      };
+      const right = {
+        x: node.point.x + dir.y * half,
+        y: node.point.y - dir.x * half
+      };
+      results.push({ dir, angle, left, right, half, length, wall: anchor.wall, end: anchor.end });
+    }
+    results.sort((a, b) => a.angle - b.angle);
+    return results;
+  }
+  private intersectRays(originA: Point, dirA: Point, originB: Point, dirB: Point): Point | null {
+    const denom = dirA.x * dirB.y - dirA.y * dirB.x;
+    if (Math.abs(denom) < 1e-6) {
+      return null;
+    }
+    const diffX = originB.x - originA.x;
+    const diffY = originB.y - originA.y;
+    const t = (diffX * dirB.y - diffY * dirB.x) / denom;
+    return {
+      x: originA.x + dirA.x * t,
+      y: originA.y + dirA.y * t
+    };
   }
   private roomBounds(room: Room): Bounds {
     return {
@@ -770,13 +1021,74 @@ export class DesignStudioPage implements OnInit, OnDestroy {
   private boundsIntersect(a: Bounds, b: Bounds): boolean {
     return !(a.maxX < b.minX || a.minX > b.maxX || a.maxY < b.minY || a.minY > b.maxY);
   }
+  private findClosestIntersection(origin: Point, candidate: Point): { point: Point; wall: Wall; s: number; t: number } | null {
+    let best: { point: Point; wall: Wall; s: number; t: number } | null = null;
+    this.walls.forEach(wall=>{
+      const hit = this.segmentIntersectionDetailed(origin, candidate, wall.a, wall.b);
+      if(!hit){ return; }
+      const sClamped = Math.max(0, Math.min(1, hit.s));
+      if (sClamped <= this.intersectionEpsilon) {
+        return;
+      }
+      if (sClamped >= 1 - this.intersectionEpsilon && best) {
+        return;
+      }
+      if (!best || sClamped < best.s) {
+        best = { point: { x: Math.round(hit.point.x), y: Math.round(hit.point.y) }, wall, s: sClamped, t: Math.max(0, Math.min(1, hit.t)) };
+      }
+    });
+    return best;
+  }
+  private mergeNearbyNodes(threshold = 1.5): void {
+    const nodes = this.wallNodeIndex();
+    let changed = false;
+    for (let i = 0; i < nodes.length; i++) {
+      for (let j = i + 1; j < nodes.length; j++) {
+        const nodeA = nodes[i];
+        const nodeB = nodes[j];
+        if (this.dist(nodeA.point, nodeB.point) <= threshold) {
+          const merged = {
+            x: Math.round((nodeA.point.x + nodeB.point.x) / 2),
+            y: Math.round((nodeA.point.y + nodeB.point.y) / 2)
+          };
+          nodeA.point.x = merged.x;
+          nodeA.point.y = merged.y;
+          nodeB.point.x = merged.x;
+          nodeB.point.y = merged.y;
+          nodeA.anchors.forEach(anchor => {
+            anchor.point.x = merged.x;
+            anchor.point.y = merged.y;
+            anchor.wall[anchor.end] = anchor.point;
+          });
+          nodeB.anchors.forEach(anchor => {
+            anchor.point.x = merged.x;
+            anchor.point.y = merged.y;
+            anchor.wall[anchor.end] = anchor.point;
+          });
+          changed = true;
+        }
+      }
+    }
+    if (changed) {
+      this.invalidate3dCache();
+    }
+  }
 
   private resolveWallPoint(raw: Point): Point {
     const origin = this.wallPath.length > 0 ? this.wallPath[this.wallPath.length - 1] : this.draftA;
     let point = { ...raw };
     const snappedExisting = this.snapToExistingNode(point);
     if (snappedExisting) {
+      this.guideOverlay = null;
+      this.pendingIntersection = null;
       return snappedExisting;
+    }
+    if (origin) {
+      const guided = this.applyDirectionalGuides(origin, point);
+      point = guided.point;
+      this.guideOverlay = guided.guide;
+    } else {
+      this.guideOverlay = null;
     }
     if (origin && this.angleSnap) {
       point = this.applyAngleSnap(origin, point);
@@ -784,12 +1096,45 @@ export class DesignStudioPage implements OnInit, OnDestroy {
     if (this.snap && (!origin || !this.angleSnap)) {
       point = this.snapPoint(point);
     }
+    if (origin) {
+      const hit = this.findClosestIntersection(origin, point);
+      if (hit) {
+        point = hit.point;
+        this.pendingIntersection = hit.point;
+        this.guideOverlay = null;
+      } else {
+        this.pendingIntersection = null;
+      }
+    } else {
+      this.pendingIntersection = null;
+    }
     const after = this.snapToExistingNode(point);
-    return after ?? point;
+    const resolved = after ?? point;
+    if (origin) {
+      const length = this.segLen(origin, resolved);
+      if (length < this.wallMinLength) {
+        const dir = this.unitVector(origin, resolved);
+        const adjusted = {
+          x: origin.x + dir.x * this.wallMinLength,
+          y: origin.y + dir.y * this.wallMinLength
+        };
+        this.pendingIntersection = null;
+        this.guideOverlay = null;
+        this.announceConstraint(`Walls must be at least ${this.formatLength(this.wallMinLength)}. Auto-extended.`, 'warning');
+        return adjusted;
+      }
+      if (length > this.wallMaxLength) {
+        this.announceConstraint(`Warning: walls longer than ${this.formatLength(this.wallMaxLength)} may reduce accuracy.`, 'warning');
+      } else {
+        this.clearConstraintMessage();
+      }
+    }
+    return resolved;
   }
 
   private resolveGenericPoint(raw: Point): Point {
     let point = { ...raw };
+    this.pendingIntersection = null;
     const snappedExisting = this.snapToExistingNode(point);
     if (snappedExisting) {
       return snappedExisting;
@@ -856,6 +1201,10 @@ export class DesignStudioPage implements OnInit, OnDestroy {
     const dx=b.x-a.x, dy=b.y-a.y; const len = Math.hypot(dx,dy) || 1;
     return { x: dx/len, y: dy/len };
   }
+  private normalizeVector(vec: Point): Point {
+    const len = Math.hypot(vec.x, vec.y) || 1;
+    return { x: vec.x / len, y: vec.y / len };
+  }
   private uid(){ return Math.random().toString(36).slice(2,9); }
   private pickRoomAtPoint(point: Point): Room | null {
     const margin = Math.max(10, this.gridSpacing * 0.1);
@@ -901,15 +1250,174 @@ export class DesignStudioPage implements OnInit, OnDestroy {
   }
   get wallHandlesList(){ return this.wallNodeIndex(); }
   get visibleWallHandlesList(){
-    const view = this.currentViewBounds(this.gridSpacing * 4);
+    const nodes = this.wallNodeIndex();
     const keepSelected = this.selectedWallId;
-    return this.wallNodeIndex().filter(node => {
+    if (!this.showWallHandles) {
+      if (keepSelected) {
+        return nodes.filter(node => node.anchors.some(anchor => anchor.wall.id === keepSelected));
+      }
+      return [];
+    }
+    const view = this.currentViewBounds(this.gridSpacing * 4);
+    return nodes.filter(node => {
       if (keepSelected && node.anchors.some(anchor => anchor.wall.id === keepSelected)) {
         return true;
       }
       const p = node.point;
       return p.x >= view.minX && p.x <= view.maxX && p.y >= view.minY && p.y <= view.maxY;
     });
+  }
+  get cornerAngleLabels(): CornerAngleLabel[] {
+    if (this.lodDetail !== 'high') {
+      return [];
+    }
+    const view = this.currentViewBounds(this.gridSpacing * 1.5);
+    const nodes = this.wallNodeIndex();
+    const labels: CornerAngleLabel[] = [];
+    const baseRadius = Math.max(120, this.gridSpacing * 1.2);
+    const labelOffset = Math.max(60, this.gridSpacing * 0.8);
+    const minAngle = 5 * Math.PI / 180;
+    nodes.forEach(node => {
+      const { point } = node;
+      if (point.x < view.minX || point.x > view.maxX || point.y < view.minY || point.y > view.maxY) {
+        return;
+      }
+      const directions = this.wallNodeDirections(node);
+      if (directions.length < 2) {
+        return;
+      }
+      const localRadius = Math.max(baseRadius, Math.max(...directions.map(d => d.half)) * 2);
+      const labelRadius = localRadius + labelOffset;
+      const segments: { start: number; size: number }[] = [];
+      for (let i = 0; i < directions.length; i++) {
+        if (directions.length === 2 && i === 1) {
+          continue;
+        }
+        const current = directions[i];
+        const next = directions[(i + 1) % directions.length];
+        let diff = next.angle - current.angle;
+        if (diff <= 0) {
+          diff += Math.PI * 2;
+        }
+        segments.push({ start: current.angle, size: diff });
+      }
+      let arcs: { start: number; size: number }[] = [];
+      if (directions.length === 2) {
+        const chosen = segments.reduce((best, seg) => (seg.size < best.size ? seg : best));
+        if (chosen.size >= minAngle && chosen.size <= Math.PI - 1e-3) {
+          arcs = [chosen];
+        }
+      } else {
+        arcs = segments.filter(seg => seg.size >= minAngle && seg.size <= Math.PI - 1e-3);
+      }
+      arcs.forEach((arc, idx) => {
+        const mid = arc.start + arc.size / 2;
+        const degrees = arc.size * 180 / Math.PI;
+        const text = this.formatAngleLabel(degrees);
+        if (!text) {
+          return;
+        }
+        const path = this.describeAngleArc(point.x, point.y, localRadius, arc.start, arc.start + arc.size);
+        const labelX = point.x + Math.cos(mid) * labelRadius;
+        const labelY = point.y + Math.sin(mid) * labelRadius;
+        labels.push({
+          id: `${this.pointKey(point)}:${idx}`,
+          cx: point.x,
+          cy: point.y,
+          x: labelX,
+          y: labelY,
+          text,
+          path
+        });
+      });
+    });
+    return labels;
+  }
+  get cornerJoinOverlays(): CornerJoinOverlay[] {
+    if (this.wallJoinStyle === 'butt') {
+      return [];
+    }
+    const overlays: CornerJoinOverlay[] = [];
+    const nodes = this.wallNodeIndex();
+    const view = this.currentViewBounds(this.gridSpacing * 1.5);
+    const minAngle = 5 * Math.PI / 180;
+    nodes.forEach(node => {
+      const { point } = node;
+      if (point.x < view.minX || point.x > view.maxX || point.y < view.minY || point.y > view.maxY) {
+        return;
+      }
+      const directions = this.wallNodeDirections(node);
+      if (directions.length < 2) {
+        return;
+      }
+      for (let i = 0; i < directions.length; i++) {
+        const current = directions[i];
+        const next = directions[(i + 1) % directions.length];
+        let angleSize = next.angle - current.angle;
+        if (angleSize <= 0) {
+          angleSize += Math.PI * 2;
+        }
+        if (angleSize < minAngle) {
+          continue;
+        }
+        if (this.wallJoinStyle === 'miter' && angleSize >= Math.PI - 1e-3) {
+          continue;
+        }
+        if (this.wallJoinStyle === 'round' && angleSize >= Math.PI * 1.2) {
+          continue;
+        }
+        const highlight = current.wall.id === this.selectedWallId || next.wall.id === this.selectedWallId;
+        const baseFill = highlight ? '#2563eb' : '#111827';
+        if (this.wallJoinStyle === 'miter') {
+          let joinPoint = this.intersectRays(current.left, current.dir, next.right, next.dir);
+          const maxReach = Math.min(Math.min(current.length, next.length), Math.max(current.half, next.half) * 3.2 + 80);
+          if (
+            !joinPoint ||
+            !Number.isFinite(joinPoint.x) ||
+            !Number.isFinite(joinPoint.y) ||
+            this.dist(joinPoint, point) > maxReach
+          ) {
+            const bisectorDir = this.normalizeVector({
+              x: current.dir.x + next.dir.x,
+              y: current.dir.y + next.dir.y
+            });
+            const fallback = this.dist(bisectorDir, { x: 0, y: 0 }) < 1e-3 ? current.dir : bisectorDir;
+            joinPoint = {
+              x: point.x + fallback.x * maxReach,
+              y: point.y + fallback.y * maxReach
+            };
+          }
+          const path = `M ${point.x} ${point.y} L ${current.left.x} ${current.left.y} L ${joinPoint.x} ${joinPoint.y} L ${next.right.x} ${next.right.y} Z`;
+          overlays.push({
+            id: `${this.pointKey(point)}:${i}:miter`,
+            path,
+            fill: baseFill
+          });
+          continue;
+        }
+        if (this.wallJoinStyle === 'round') {
+          const radius = Math.max(current.half, next.half);
+          let controlDir = this.normalizeVector({
+            x: current.dir.x + next.dir.x,
+            y: current.dir.y + next.dir.y
+          });
+          if (Math.abs(controlDir.x) < 1e-3 && Math.abs(controlDir.y) < 1e-3) {
+            controlDir = current.dir;
+          }
+          const control = {
+            x: point.x + controlDir.x * radius * 1.8,
+            y: point.y + controlDir.y * radius * 1.8
+          };
+          const path = `M ${point.x} ${point.y} L ${current.left.x} ${current.left.y} Q ${control.x} ${control.y} ${next.right.x} ${next.right.y} Z`;
+          overlays.push({
+            id: `${this.pointKey(point)}:${i}:round`,
+            path,
+            fill: baseFill
+          });
+        }
+      }
+    });
+    return overlays;
   }
   get visibleWalls(): Wall[] {
     const view = this.currentViewBounds(this.gridSpacing * 4);
@@ -930,6 +1438,9 @@ export class DesignStudioPage implements OnInit, OnDestroy {
     });
   }
   get visibleMeasurements(): MeasurementSegment[] {
+    if (this.lodDetail === 'low') {
+      return [];
+    }
     const view = this.currentViewBounds(this.gridSpacing * 3);
     return this.measurements.filter(segment => this.boundsIntersect(this.measurementBounds(segment), view));
   }
@@ -1177,18 +1688,47 @@ export class DesignStudioPage implements OnInit, OnDestroy {
     const nodes = this.wallNodeIndex();
     const entry = nodes.find(n=>this.pointKey(n.point)===targetKey);
     if(entry){
+      const previous = entry.anchors.map(anchor => ({
+        anchor,
+        x: anchor.point.x,
+        y: anchor.point.y
+      }));
       entry.anchors.forEach(anchor=>{
         anchor.point.x = to.x;
         anchor.point.y = to.y;
         anchor.wall[anchor.end] = anchor.point;
       });
+      let violated = false;
+      for (const { anchor } of entry.anchors.map(a => ({ anchor: a }))) {
+        const length = this.segLen(anchor.wall.a, anchor.wall.b);
+        if (length < this.wallMinLength) {
+          violated = true;
+          this.announceConstraint(`Walls must be at least ${this.formatLength(this.wallMinLength)}. Move cancelled.`, 'error');
+          break;
+        }
+        if (length > this.wallMaxLength) {
+          this.announceConstraint(`Warning: walls longer than ${this.formatLength(this.wallMaxLength)} may reduce accuracy.`, 'warning');
+        }
+      }
+      if (violated) {
+        previous.forEach(state=>{
+          state.anchor.point.x = state.x;
+          state.anchor.point.y = state.y;
+          state.anchor.wall[state.anchor.end] = state.anchor.point;
+        });
+      } else {
+        this.clearConstraintMessage();
+        this.reconcileWallGeometry(entry.anchors.map(anchor => anchor.wall));
+      }
     } else {
       point.x = to.x;
       point.y = to.y;
-    }
-    if (this.viewPort === '3d') {
+      this.mergeNearbyNodes();
       this.rebuildMeshes();
+      this.updateSelectedWallPoint();
     }
+    this.pendingIntersection = null;
+    this.guideOverlay = null;
   }
   private replaceWallWithSegments(originalId: string, segments: Wall[]){
     const idx = this.walls.findIndex(w=>w.id===originalId);
@@ -1220,47 +1760,281 @@ export class DesignStudioPage implements OnInit, OnDestroy {
     this.updateSelectedWallPoint();
     return { point: junction, created: true };
   }
-  private intersect(a1:Point,a2:Point,b1:Point,b2:Point){
+  private segmentIntersectionDetailed(a1:Point,a2:Point,b1:Point,b2:Point){
     const dax=a2.x-a1.x, day=a2.y-a1.y, dbx=b2.x-b1.x, dby=b2.y-b1.y;
     const denom = dax*dby - day*dbx;
-    if(Math.abs(denom)<1e-6) return null; // parallel or colinear -> ignore
+    if(Math.abs(denom)<1e-6) return null;
     const s = ((a1.x-b1.x)*dby - (a1.y-b1.y)*dbx)/denom;
     const t = ((a1.x-b1.x)*day - (a1.y-b1.y)*dax)/denom;
-    if(s>0 && s<1 && t>0 && t<1){
-      return { point: { x: a1.x + s*dax, y: a1.y + s*day }, s, t };
+    if(s < -this.intersectionEpsilon || s > 1 + this.intersectionEpsilon || t < -this.intersectionEpsilon || t > 1 + this.intersectionEpsilon){
+      return null;
     }
-    return null;
+    const clampedS = Math.max(0, Math.min(1, s));
+    const point = { x: a1.x + clampedS*dax, y: a1.y + clampedS*day };
+    return { point, s, t };
   }
   private splitWallAtPoints(w:Wall, params:number[]):Wall[]{
-    if(params.length===0) return [w];
-    const sorted=[...params].sort((a,b)=>a-b);
-    const parts:Wall[]=[];
-    let lastA=w.a;
-    for(const t of sorted){
-      const mid={ x: w.a.x + (w.b.x-w.a.x)*t, y: w.a.y + (w.b.y-w.a.y)*t };
-      parts.push({ id:this.uid(), a:lastA, b:mid, thickness:w.thickness, height:w.height, openings:[] });
-      lastA = mid;
+    if(params.length===0){ return [w]; }
+    const sorted = [...params]
+      .filter(t => Number.isFinite(t))
+      .sort((a,b)=>a-b);
+    const normalized: number[] = [];
+    sorted.forEach(t=>{
+      const clamped = Math.max(0, Math.min(1, t));
+      if (normalized.length === 0 || Math.abs(clamped - normalized[normalized.length-1]) > 1e-4) {
+        normalized.push(clamped);
+      }
+    });
+    if (normalized.length === 0) {
+      return [w];
     }
-    parts.push({ id:this.uid(), a:lastA, b:w.b, thickness:w.thickness, height:w.height, openings:[] });
-    return parts;
+    const totalLength = this.segLen(w.a, w.b);
+    if (totalLength < 1e-3) {
+      return [w];
+    }
+    const knots = [0, ...normalized, 1];
+    const extras = this.copyWallExtras(w);
+    const meta: {
+      startT: number;
+      endT: number;
+      startPoint: Point;
+      endPoint: Point;
+      startOffset: number;
+      endOffset: number;
+      length: number;
+    }[] = [];
+    for (let i = 0; i < knots.length - 1; i++) {
+      const startT = knots[i];
+      const endT = knots[i + 1];
+      if (endT - startT <= 1e-6) {
+        continue;
+      }
+      const startPoint = {
+        x: w.a.x + (w.b.x - w.a.x) * startT,
+        y: w.a.y + (w.b.y - w.a.y) * startT
+      };
+      const endPoint = {
+        x: w.a.x + (w.b.x - w.a.x) * endT,
+        y: w.a.y + (w.b.y - w.a.y) * endT
+      };
+      const startOffset = startT * totalLength;
+      const endOffset = endT * totalLength;
+      meta.push({
+        startT,
+        endT,
+        startPoint,
+        endPoint,
+        startOffset,
+        endOffset,
+        length: endOffset - startOffset
+      });
+    }
+    if (meta.length === 0) {
+      return [w];
+    }
+    const tolerance = Math.max(1e-3, totalLength * 1e-4);
+    const assignedOpenings = meta.map(() => [] as Opening[]);
+    const baseOpenings = (w.openings ?? []).map(opening => ({ ...opening }));
+    for (const opening of baseOpenings) {
+      let targetIndex = meta.length - 1;
+      for (let i = 0; i < meta.length; i++) {
+        const seg = meta[i];
+        if (opening.offset >= seg.startOffset - tolerance && opening.offset <= seg.endOffset + tolerance) {
+          targetIndex = i;
+          break;
+        }
+      }
+      const seg = meta[targetIndex];
+      const offset = this.clamp(opening.offset - seg.startOffset, 0, seg.length);
+      assignedOpenings[targetIndex].push({ ...opening, offset });
+    }
+    const segments: Wall[] = [];
+    for (let i = 0; i < meta.length; i++) {
+      const seg = meta[i];
+      const openings = assignedOpenings[i].sort((a, b) => a.offset - b.offset);
+      const segment = {
+        id: this.uid(),
+        a: { ...seg.startPoint },
+        b: { ...seg.endPoint },
+        thickness: w.thickness,
+        height: w.height,
+        openings,
+        ...extras
+      } as Wall;
+      segments.push(segment);
+    }
+    return segments;
+  }
+
+  private copyWallExtras(w: Wall): Record<string, unknown> {
+    const extras: Record<string, unknown> = {};
+    const reserved = new Set(['id', 'a', 'b', 'thickness', 'height', 'openings']);
+    Object.keys(w).forEach(key => {
+      if (!reserved.has(key)) {
+        extras[key] = (w as Record<string, unknown>)[key];
+      }
+    });
+    return extras;
   }
   private splitAgainstAllWalls(newWall:Wall):Wall[]{
-    // gather intersection params for new wall and split existing walls as needed
-    const cutsNew:number[]=[]; const updates: { idx:number; cuts:number[] }[]=[];
+    const cutsNew:number[]=[];
+    const updates = new Map<number, number[]>();
     this.walls.forEach((w,idx)=>{
-      const hit = this.intersect(newWall.a,newWall.b,w.a,w.b);
-      if(hit){ cutsNew.push(hit.s); updates.push({ idx, cuts:[hit.t] }); }
+      const hit = this.segmentIntersectionDetailed(newWall.a,newWall.b,w.a,w.b);
+      if(!hit){ return; }
+      const sClamped = Math.max(0, Math.min(1, hit.s));
+      const tClamped = Math.max(0, Math.min(1, hit.t));
+      if (sClamped > this.intersectionEpsilon && sClamped < 1 - this.intersectionEpsilon) {
+        cutsNew.push(sClamped);
+      }
+      if (tClamped > this.intersectionEpsilon && tClamped < 1 - this.intersectionEpsilon) {
+        const entry = updates.get(idx);
+        if (entry) { entry.push(tClamped); }
+        else { updates.set(idx, [tClamped]); }
+      }
     });
-    // apply splits on existing walls
     const produced:Wall[]=[]; const survivors:Wall[]=[];
     this.walls.forEach((w,idx)=>{
-      const upd = updates.find(u=>u.idx===idx);
-      if(upd){ produced.push(...this.splitWallAtPoints(w, upd.cuts)); }
+      const cuts = updates.get(idx);
+      if(cuts && cuts.length){ produced.push(...this.splitWallAtPoints(w, cuts)); }
       else survivors.push(w);
     });
     this.walls = survivors.concat(produced);
-    // split new wall and return segments
     return this.splitWallAtPoints(newWall, cutsNew);
+  }
+
+  private reconcileWallGeometry(walls: Wall[]): void {
+    const seen = new Set<string>();
+    const unique: Wall[] = [];
+    for (const wall of walls) {
+      if (!wall) {
+        continue;
+      }
+      if (seen.has(wall.id)) {
+        continue;
+      }
+      seen.add(wall.id);
+      unique.push(wall);
+    }
+    this.mergeNearbyNodes();
+    if (!unique.length) {
+      this.rebuildMeshes();
+      this.updateSelectedWallPoint();
+      this.pendingIntersection = null;
+      this.guideOverlay = null;
+      return;
+    }
+    const selectionSnapshot = this.selectedWallId
+      ? {
+          id: this.selectedWallId,
+          point: this.selectedWallPoint ? { x: this.selectedWallPoint.x, y: this.selectedWallPoint.y } : null
+        }
+      : null;
+    unique.forEach(w => this.reflowWallWithIntersections(w));
+    this.mergeNearbyNodes();
+    this.rebuildMeshes();
+    if (selectionSnapshot?.point) {
+      this.restoreSelectionNearPoint(selectionSnapshot.point, selectionSnapshot.id);
+    } else if (selectionSnapshot?.id) {
+      if (this.walls.some(w => w.id === selectionSnapshot.id)) {
+        this.updateSelectedWallPoint();
+      } else {
+        this.selectedWallId = null;
+        this.selectedWallPoint = null;
+        this.selectedWallT = null;
+      }
+    } else {
+      this.updateSelectedWallPoint();
+    }
+    this.pendingIntersection = null;
+    this.guideOverlay = null;
+  }
+
+  private reflowWallWithIntersections(wall: Wall): Wall[] {
+    const idx = this.walls.findIndex(existing => existing.id === wall.id);
+    if (idx === -1) {
+      return [];
+    }
+    const clone = {
+      ...wall,
+      a: { ...wall.a },
+      b: { ...wall.b },
+      openings: (wall.openings ?? []).map(opening => ({ ...opening }))
+    } as Wall;
+    this.walls.splice(idx, 1);
+    const segments = this.splitAgainstAllWalls(clone);
+    if (!segments.length) {
+      return [];
+    }
+    segments[0].id = wall.id;
+    this.walls.splice(idx, 0, ...segments);
+    return segments;
+  }
+
+  private restoreSelectionNearPoint(point: Point, fallbackWallId?: string | null): void {
+    let best: { wall: Wall; t: number; dist: number } | null = null;
+    for (const wall of this.walls) {
+      const { dist, t } = this.pointSegDistanceParam(point, wall.a, wall.b);
+      if (!best || dist < best.dist) {
+        best = { wall, t, dist };
+      }
+    }
+    if (best && best.dist <= Math.max(6, best.wall.thickness / 3)) {
+      this.selectedWallId = best.wall.id;
+      this.selectedWallT = best.t;
+      this.updateSelectedWallPoint();
+      return;
+    }
+    if (fallbackWallId && this.walls.some(w => w.id === fallbackWallId)) {
+      this.selectedWallId = fallbackWallId;
+      this.updateSelectedWallPoint();
+      return;
+    }
+    this.selectedWallId = null;
+    this.selectedWallPoint = null;
+    this.selectedWallT = null;
+  }
+
+  private normalizeAngle(angle: number): number {
+    const twoPi = Math.PI * 2;
+    let result = angle % twoPi;
+    if (result < 0) {
+      result += twoPi;
+    }
+    return result;
+  }
+
+  private describeAngleArc(cx: number, cy: number, radius: number, start: number, end: number): string {
+    const normalizedStart = this.normalizeAngle(start);
+    let sweep = this.normalizeAngle(end) - normalizedStart;
+    if (sweep <= 0) {
+      sweep += Math.PI * 2;
+    }
+    if (sweep > Math.PI * 2) {
+      sweep = Math.PI * 2;
+    }
+    const actualEnd = normalizedStart + sweep;
+    const startPoint = {
+      x: cx + Math.cos(normalizedStart) * radius,
+      y: cy + Math.sin(normalizedStart) * radius
+    };
+    const endPoint = {
+      x: cx + Math.cos(actualEnd) * radius,
+      y: cy + Math.sin(actualEnd) * radius
+    };
+    const largeArc = sweep > Math.PI ? 1 : 0;
+    return `M ${startPoint.x} ${startPoint.y} A ${radius} ${radius} 0 ${largeArc} 1 ${endPoint.x} ${endPoint.y}`;
+  }
+
+  private formatAngleLabel(degrees: number): string {
+    if (!Number.isFinite(degrees) || degrees <= 0) {
+      return '';
+    }
+    const rounded = Math.round(degrees);
+    if (Math.abs(degrees - rounded) < 0.2) {
+      return `${rounded}°`;
+    }
+    return `${degrees.toFixed(1).replace(/\.0$/, '')}°`;
   }
   private hitHandle(p:Point): ({ kind:'wall-node'; anchors: WallDragAnchor[] } | { kind:'room-corner'; roomId: string; corner:'nw'|'ne'|'sw'|'se' } | null){
     for(const node of this.wallNodeIndex()){
@@ -1299,6 +2073,9 @@ export class DesignStudioPage implements OnInit, OnDestroy {
         spacing:this.gridSpacing,
         majorEvery:this.gridMajorEvery,
         opacity:this.gridOpacity
+      },
+      settings:{
+        wallJoinStyle:this.wallJoinStyle
       }
     };
   }
@@ -1320,6 +2097,13 @@ export class DesignStudioPage implements OnInit, OnDestroy {
     this.updateGridSpacing(g.spacing ?? this.gridSpacing);
     this.updateGridMajorEvery(g.majorEvery ?? this.gridMajorEvery);
     this.updateGridOpacity(g.opacity ?? this.gridOpacity);
+    const settings = m?.settings ?? {};
+    const join = settings.wallJoinStyle;
+    if (join === 'butt' || join === 'miter' || join === 'round') {
+      this.wallJoinStyle = join;
+    } else {
+      this.wallJoinStyle = 'miter';
+    }
     this.rebuildMeshes();
   }
 
@@ -1335,6 +2119,7 @@ export class DesignStudioPage implements OnInit, OnDestroy {
     this.measureStart = null;
     this.measureDraft = null;
     this.measurements = [];
+    this.wallJoinStyle = 'miter';
     this.rebuildMeshes();
     this.setSaveState('idle', 'New plan ready');
   }
@@ -1529,6 +2314,8 @@ export class DesignStudioPage implements OnInit, OnDestroy {
     this.selectedWallId = null;
     this.selectedWallPoint = null;
     this.selectedWallT = null;
+    this.guideOverlay = null;
+    this.pendingIntersection = null;
     this.setSaveState('idle', 'Branching wall: click to add the next point.');
   }
 
@@ -1558,6 +2345,9 @@ export class DesignStudioPage implements OnInit, OnDestroy {
       this.measureDraft = null;
       this.setSaveState('idle', 'Measurement mode off.');
     }
+    this.guideOverlay = null;
+    this.pendingIntersection = null;
+    this.invalidate3dCache();
     if (this.viewPort === '3d') {
       this.scheduleFrame();
     }
@@ -1568,6 +2358,7 @@ export class DesignStudioPage implements OnInit, OnDestroy {
       return;
     }
     this.measurements = [];
+    this.invalidate3dCache();
     if (this.viewPort === '3d') {
       this.scheduleFrame();
     }
@@ -1597,6 +2388,7 @@ export class DesignStudioPage implements OnInit, OnDestroy {
     }));
     this.wallFaces = wallFaces;
     this.roomMeshes = roomMeshes;
+    this.invalidate3dCache();
     if (this.viewPort === '3d') {
       this.scheduleFrame();
     }
@@ -1605,6 +2397,25 @@ export class DesignStudioPage implements OnInit, OnDestroy {
   private scheduleFrame(): void {
     if (this.viewPort !== '3d') {
       return;
+    }
+    const canvas = this.canvas3d?.nativeElement;
+    if (canvas) {
+      const width = canvas.clientWidth || canvas.width;
+      const height = canvas.clientHeight || canvas.height;
+      if (this.renderCache && (width !== this.renderCacheSize.width || height !== this.renderCacheSize.height)) {
+        this.invalidate3dCache();
+      }
+      if (!this.autoOrbit && !this.dirty3d && this.renderCache) {
+        const ctx = canvas.getContext('2d');
+        if (ctx) {
+          try {
+            ctx.putImageData(this.renderCache, 0, 0);
+            return;
+          } catch {
+            this.invalidate3dCache();
+          }
+        }
+      }
     }
     if (this.animationId !== null) {
       return;
@@ -1669,6 +2480,20 @@ export class DesignStudioPage implements OnInit, OnDestroy {
     }
     for (const measurement of this.measurements) {
       this.drawMeasurement3d(ctx, matrix, measurement, width, height, false);
+    }
+    if (!this.autoOrbit) {
+      try {
+        this.renderCache = ctx.getImageData(0, 0, width, height);
+        this.renderCacheSize = { width, height };
+        this.dirty3d = false;
+      } catch {
+        this.renderCache = null;
+        this.dirty3d = true;
+      }
+    } else {
+      this.renderCache = null;
+      this.renderCacheSize = { width: 0, height: 0 };
+      this.dirty3d = true;
     }
     if (this.autoOrbit) {
       this.animationId = requestAnimationFrame(next => this.renderFrame(next));

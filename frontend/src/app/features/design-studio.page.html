@@ -226,22 +226,49 @@
               </g>
             </g>
             <!-- Walls and openings -->
-            <g stroke="#111827" stroke-linecap="butt" fill="none">
+            <g>
               <g *ngFor="let w of visibleWalls">
-                <line [attr.x1]="w.a.x" [attr.y1]="w.a.y" [attr.x2]="w.b.x" [attr.y2]="w.b.y" [attr.stroke-width]="w.thickness"
-                      [attr.stroke]="selectedWallId===w.id ? '#2563eb' : '#111827'"
-                      [attr.stroke-opacity]="selectedWallId===w.id ? 0.85 : 1" />
-                <g *ngFor="let o of w.openings">
-                  <line [attr.x1]="w.a.x + (w.b.x-w.a.x)*(o.offset - o.width/2)/ (Math.hypot(w.b.x-w.a.x,w.b.y-w.a.y))"
-                        [attr.y1]="w.a.y + (w.b.y-w.a.y)*(o.offset - o.width/2)/ (Math.hypot(w.b.x-w.a.x,w.b.y-w.a.y))"
-                        [attr.x2]="w.a.x + (w.b.x-w.a.x)*(o.offset + o.width/2)/ (Math.hypot(w.b.x-w.a.x,w.b.y-w.a.y))"
-                        [attr.y2]="w.a.y + (w.b.y-w.a.y)*(o.offset + o.width/2)/ (Math.hypot(w.b.x-w.a.x,w.b.y-w.a.y))"
-                        [attr.stroke-width]="w.thickness+6" stroke="#ffffff" stroke-linecap="butt" />
-                </g>
+                <path [attr.d]="wallOutlinePath(w)"
+                      [attr.fill]="wallFillColor(w)"
+                      [attr.fill-opacity]="selectedWallId===w.id ? 0.9 : 1"
+                      [attr.stroke]="wallOutlineStrokeColor(w)"
+                      [attr.stroke-width]="wallOutlineStrokeWidth()"
+                      stroke-linejoin="round"></path>
+                <ng-container *ngIf="showWallOpenings">
+                  <g *ngFor="let o of w.openings">
+                    <line [attr.x1]="w.a.x + (w.b.x-w.a.x)*(o.offset - o.width/2)/ (Math.hypot(w.b.x-w.a.x,w.b.y-w.a.y))"
+                          [attr.y1]="w.a.y + (w.b.y-w.a.y)*(o.offset - o.width/2)/ (Math.hypot(w.b.x-w.a.x,w.b.y-w.a.y))"
+                          [attr.x2]="w.a.x + (w.b.x-w.a.x)*(o.offset + o.width/2)/ (Math.hypot(w.b.x-w.a.x,w.b.y-w.a.y))"
+                          [attr.y2]="w.a.y + (w.b.y-w.a.y)*(o.offset + o.width/2)/ (Math.hypot(w.b.x-w.a.x,w.b.y-w.a.y))"
+                          [attr.stroke-width]="w.thickness + 6"
+                          stroke="#f8fafc"
+                          stroke-linecap="butt"
+                          stroke-opacity="0.95" />
+                  </g>
+                </ng-container>
               </g>
+            </g>
+            <g *ngIf="cornerJoinOverlays.length" pointer-events="none">
+              <path *ngFor="let join of cornerJoinOverlays"
+                    [attr.d]="join.path"
+                    [attr.fill]="join.fill"
+                    [attr.stroke]="join.stroke || 'none'"
+                    [attr.stroke-width]="join.strokeWidth ?? 0"></path>
             </g>
             <g fill="#1d4ed8">
               <circle *ngFor="let node of visibleWallHandlesList" [attr.cx]="node.point.x" [attr.cy]="node.point.y" r="10" />
+            </g>
+            <g *ngIf="cornerAngleLabels.length" pointer-events="none">
+              <g *ngFor="let angle of cornerAngleLabels">
+                <path *ngIf="angle.path" [attr.d]="angle.path" stroke="#38bdf8" stroke-width="6" stroke-opacity="0.8" stroke-linecap="round" fill="none"></path>
+                <text [attr.x]="angle.x" [attr.y]="angle.y" text-anchor="middle" dominant-baseline="central" font-size="14"
+                      fill="#0ea5e9" stroke="#ffffff" stroke-width="4" stroke-linejoin="round" paint-order="stroke">
+                  {{ angle.text }}
+                </text>
+                <text [attr.x]="angle.x" [attr.y]="angle.y" text-anchor="middle" dominant-baseline="central" font-size="14" fill="#0ea5e9">
+                  {{ angle.text }}
+                </text>
+              </g>
             </g>
             <!-- Draft preview -->
             <g *ngIf="creating && draftA && draftB">
@@ -274,6 +301,13 @@
                   {{ formatLength(bounds.maxY - bounds.minY) }}
                 </text>
               </g>
+            </g>
+            <g *ngIf="guideOverlay as guide" stroke="#22d3ee" stroke-width="4" stroke-dasharray="10 8" opacity="0.55">
+              <line [attr.x1]="guide.start.x" [attr.y1]="guide.start.y" [attr.x2]="guide.end.x" [attr.y2]="guide.end.y"></line>
+            </g>
+            <g *ngIf="pendingIntersection as junction">
+              <circle [attr.cx]="junction.x" [attr.cy]="junction.y" r="18" fill="rgba(34,211,238,0.35)" stroke="#0891b2" stroke-width="3"></circle>
+              <circle [attr.cx]="junction.x" [attr.cy]="junction.y" r="6" fill="#0e7490"></circle>
             </g>
             <g *ngFor="let measurement of visibleMeasurements" stroke="#7c3aed" stroke-width="2" stroke-dasharray="12 8" fill="none">
               <line [attr.x1]="measurement.a.x" [attr.y1]="measurement.a.y" [attr.x2]="measurement.b.x" [attr.y2]="measurement.b.y"></line>
@@ -365,6 +399,30 @@
           <button type="button" aria-label="Sunset gradient theme"
             class="cursor-pointer h-[30px] w-[30px] px-2 py-1 rounded-full bg-radial-[at_0%_100%] from-rose-400 via-green-400 to-indigo-400">
             <span class="sr-only">Vibrant palette</span>
+          </button>
+        </div>
+      </div>
+      <div #joinStyles
+        class="h-auto overflow-hidden bg-white/90 dark:bg-slate-900/70 p-3 rounded-lg overflow-x-hidden overflow-y-auto flex flex-col gap-2 shadow-lg text-sm">
+        <div class="font-semibold">Corner join</div>
+        <div class="flex items-center justify-center gap-2">
+          <button type="button" class="px-3 py-1 rounded border border-slate-200/70 dark:border-slate-700/60"
+                  [class.bg-blue-500]="wallJoinStyle==='butt'"
+                  [class.text-white]="wallJoinStyle==='butt'"
+                  (click)="setWallJoinStyle('butt')">
+            Butt
+          </button>
+          <button type="button" class="px-3 py-1 rounded border border-slate-200/70 dark:border-slate-700/60"
+                  [class.bg-blue-500]="wallJoinStyle==='miter'"
+                  [class.text-white]="wallJoinStyle==='miter'"
+                  (click)="setWallJoinStyle('miter')">
+            Miter
+          </button>
+          <button type="button" class="px-3 py-1 rounded border border-slate-200/70 dark:border-slate-700/60"
+                  [class.bg-blue-500]="wallJoinStyle==='round'"
+                  [class.text-white]="wallJoinStyle==='round'"
+                  (click)="setWallJoinStyle('round')">
+            Round
           </button>
         </div>
       </div>

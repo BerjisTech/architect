@@ -198,9 +198,11 @@ Build a comprehensive real estate and construction platform at architect.berjis.
   - [x] Reset view position
 - [ ] Implement rendering optimization:
   - [x] Viewport culling (only render visible elements)
-  - [ ] Level of detail (LOD) for complex objects
+  - [x] Level of detail (LOD) for complex objects
+    - Stroke width scaling, handle/measurement suppression, and opening filtering when zoomed out
   - [x] Lazy rendering for large projects
-  - [ ] Render caching for static elements
+  - [x] Render caching for static elements
+    - Cache 3D frames when orbiting is paused and reuse until geometry/camera changes
 
 ### 5.2 Wall Drawing System (Core Feature)
 
@@ -219,31 +221,31 @@ Build a comprehensive real estate and construction platform at architect.berjis.
   - Double-click or press Enter to finish wall chain
   - Right-click to undo last segment
 - [ ] Implement wall constraints:
-  - Maintain parallel/perpendicular to existing walls
-  - Minimum wall length validation
-  - Maximum wall length warnings
+  - [x] Maintain parallel/perpendicular to existing walls
+  - [x] Minimum wall length validation
+  - [x] Maximum wall length warnings
   - [x] Angle constraints (orthogonal mode)
 
 #### 5.2.2 Wall Intersection & Auto-Splitting
-- [ ] Implement automatic wall intersection detection:
-  - Real-time intersection calculation while drawing
-  - Visual indicator when walls will intersect
-  - Automatic wall splitting at intersection point
-- [ ] Create wall splitting logic:
-  - When new wall intersects existing wall, split existing wall into two segments
-  - When existing wall is moved to intersect another, auto-split both walls
-  - Maintain wall properties (thickness, height, material) across split segments
-  - Create junction nodes at intersection points
-  - Update all connected elements (doors, windows) when walls split
-- [ ] Implement T-junction handling:
-  - Properly join walls at T-intersections
-  - Maintain structural integrity at junctions
-  - Handle multiple walls meeting at single point
-- [ ] Create corner detection and handling:
-  - Automatic corner creation when walls meet at endpoints
-  - Merge nearby endpoints (within tolerance threshold)
-  - Corner angle calculation and display
-  - Proper wall joining at corners (mitered, butted, rounded)
+- [x] Implement automatic wall intersection detection:
+  - [x] Real-time intersection calculation while drawing
+  - [x] Visual indicator when walls will intersect
+  - [x] Automatic wall splitting at intersection point
+- [x] Create wall splitting logic:
+  - [x] When new wall intersects existing wall, split existing wall into two segments
+  - [x] When existing wall is moved to intersect another, auto-split both walls
+  - [x] Maintain wall properties (thickness, height, material) across split segments
+  - [x] Create junction nodes at intersection points
+  - [x] Update all connected elements (doors, windows) when walls split
+- [x] Implement T-junction handling:
+  - [x] Properly join walls at T-intersections
+  - [x] Maintain structural integrity at junctions
+  - [x] Handle multiple walls meeting at single point
+- [x] Create corner detection and handling:
+  - [x] Automatic corner creation when walls meet at endpoints
+  - [x] Merge nearby endpoints (within tolerance threshold)
+  - [x] Corner angle calculation and display
+  - [x] Proper wall joining at corners (mitered, butted, rounded)
 
 #### 5.2.3 Wall Selection & Manipulation
 - [ ] Implement wall selection:
