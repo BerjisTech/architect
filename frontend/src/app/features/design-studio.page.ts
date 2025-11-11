@@ -109,6 +109,11 @@ export class DesignStudioPage implements OnInit, OnDestroy {
         walls: { wall: Wall; originalLength: number }[];
       }
     | {
+        kind: 'wall-body';
+        walls: { wall: Wall; originalA: Point; originalB: Point }[];
+        start: Point;
+      }
+    | {
         kind: 'room-corner';
         roomId: string;
         corner: 'nw'|'ne'|'sw'|'se';
@@ -118,6 +123,7 @@ export class DesignStudioPage implements OnInit, OnDestroy {
   private draggingMoved = false;
   draggingMeasurements: MeasurementSegment[] = [];
   draggingDeltaLabel: { position: Point; text: string } | null = null;
+  private skipNextClick = false;
   // tool properties
   wallThickness = 200; // mm world units
   wallHeight = 3000;   // mm
@@ -251,6 +257,7 @@ export class DesignStudioPage implements OnInit, OnDestroy {
     this.draggingMoved = false;
     this.draggingMeasurements = [];
     this.draggingDeltaLabel = null;
+    this.skipNextClick = false;
     this.roomMeshes = [];
     this.wallFaces = [];
     this.invalidate3dCache();
@@ -367,6 +374,10 @@ export class DesignStudioPage implements OnInit, OnDestroy {
 
   // Pointer events
   onSvgClick(e: MouseEvent){
+    if (this.skipNextClick) {
+      this.skipNextClick = false;
+      return;
+    }
     const raw = this.toWorld(e);
     if (this.mode !== 'wall') {
       this.guideOverlay = null;
@@ -446,18 +457,11 @@ export class DesignStudioPage implements OnInit, OnDestroy {
         }
         this.selectedRoomId = null;
         this.selectedWallIds = nextIds;
-        const primaryId = this.selectedWallIds[this.selectedWallIds.length - 1];
-        this.selectedWallId = primaryId ?? null;
-        if (primaryId === wallId) {
-          this.selectedWallT = hit.t;
-          this.selectedWallPoint = { ...hit.proj };
-        } else {
-          this.selectedWallT = 0.5;
-          this.updateSelectedWallPoint();
-        }
+        this.selectedWallT = hit.t;
+        this.syncPrimarySelection(wallId);
         const primaryWall = this.selectedWall;
         if (this.selectedWallIds.length > 1) {
-        const total = this.calculateSelectedWallLength();
+          const total = this.totalSelectedWallLength;
           this.setSaveState('idle', `${this.selectedWallIds.length} walls selected (${this.formatLength(total)} total).`);
         } else if (primaryWall) {
           this.setSaveState('idle', `Wall length: ${this.formatLength(this.segLen(primaryWall.a, primaryWall.b))}`);
@@ -554,6 +558,55 @@ export class DesignStudioPage implements OnInit, OnDestroy {
         this.updateDragMeasurements();
         return;
       }
+      const wallHit = this.pickWallAtPoint(p, 30);
+      if (wallHit) {
+        const multiKey = e.ctrlKey || e.metaKey;
+        const rangeKey = e.shiftKey;
+        let nextIds = [...this.selectedWallIds];
+        if (!nextIds.length) {
+          nextIds = [wallHit.wall.id];
+        } else if (rangeKey && this.selectedWallId) {
+          const fromIndex = this.walls.findIndex(w => w.id === this.selectedWallId);
+          const toIndex = this.walls.findIndex(w => w.id === wallHit.wall.id);
+          if (fromIndex !== -1 && toIndex !== -1) {
+            const start = Math.min(fromIndex, toIndex);
+            const end = Math.max(fromIndex, toIndex);
+            const rangeIds = this.walls.slice(start, end + 1).map(w => w.id);
+            nextIds = Array.from(new Set([...nextIds, ...rangeIds]));
+          } else if (!nextIds.includes(wallHit.wall.id)) {
+            nextIds.push(wallHit.wall.id);
+          }
+        } else if (multiKey) {
+          if (!nextIds.includes(wallHit.wall.id)) {
+            nextIds.push(wallHit.wall.id);
+          }
+        } else if (!nextIds.includes(wallHit.wall.id)) {
+          nextIds = [wallHit.wall.id];
+        }
+        this.selectedRoomId = null;
+        this.selectedWallIds = nextIds;
+        this.selectedWallT = wallHit.t;
+        this.syncPrimarySelection(wallHit.wall.id);
+        const targetIds = this.selectedWallIds.includes(wallHit.wall.id)
+          ? this.selectedWallIds
+          : [wallHit.wall.id];
+        const dragWalls = targetIds
+          .map(id => this.walls.find(w => w.id === id))
+          .filter((w): w is Wall => Boolean(w))
+          .map(wall => ({
+            wall,
+            originalA: { x: wall.a.x, y: wall.a.y },
+            originalB: { x: wall.b.x, y: wall.b.y }
+          }));
+        this.dragging = {
+          kind: 'wall-body',
+          walls: dragWalls,
+          start: { ...p }
+        };
+        this.draggingMoved = false;
+        this.updateDragMeasurements();
+        return;
+      }
     }
   }
   onMouseMove(e: MouseEvent){
@@ -603,8 +656,25 @@ export class DesignStudioPage implements OnInit, OnDestroy {
           anchor.wall[anchor.end] = anchor.point;
         });
         this.draggingMoved = true;
+        this.skipNextClick = true;
         this.updateSelectedWallPoint();
         this.updateDragMeasurements();
+      } else if (this.dragging.kind === 'wall-body') {
+        const drag = this.dragging;
+        const dx = p.x - drag.start.x;
+        const dy = p.y - drag.start.y;
+        drag.walls.forEach(entry => {
+          entry.wall.a = { x: entry.originalA.x + dx, y: entry.originalA.y + dy };
+          entry.wall.b = { x: entry.originalB.x + dx, y: entry.originalB.y + dy };
+        });
+        this.draggingMoved = true;
+        this.skipNextClick = true;
+        this.updateSelectedWallPoint();
+        this.updateDragMeasurements();
+        this.invalidate3dCache();
+        if (this.viewPort === '3d') {
+          this.scheduleFrame();
+        }
       } else if(this.dragging.kind==='room-corner'){
         const d = this.dragging;
         const r = this.rooms.find(x=>x.id===d.roomId)!;
@@ -614,6 +684,8 @@ export class DesignStudioPage implements OnInit, OnDestroy {
         const y1 = (d.corner==='sw' || d.corner==='se') ? r.y : p.y;
         r.x = Math.min(x1,x2); r.y = Math.min(y1,y2); r.w = Math.abs(x2-x1); r.h = Math.abs(y2-y1);
         this.updateDragMeasurements();
+        this.draggingMoved = true;
+        this.skipNextClick = true;
       }
       return;
     }
@@ -636,42 +708,89 @@ export class DesignStudioPage implements OnInit, OnDestroy {
         this.toggleMeasureMode(false);
       }
       this.invalidate3dCache();
-    this.dragging = null;
-    this.draggingMoved = false;
-    this.draggingMeasurements = [];
-    this.draggingDeltaLabel = null;
-    return;
-  }
-  if(this.creating){
-    if(this.mode==='wall'){ this.finishWallDrawing(); }
-    else if(this.mode==='room'){ this.creating=false; this.draftA=null; this.draftB=null; }
-  }
-  this.dragging = null;
-  this.draggingMoved = false;
-  this.draggingMeasurements = [];
-  this.draggingDeltaLabel = null;
-  if (this.mode !== 'wall') {
-    this.guideOverlay = null;
-  }
+      this.dragging = null;
+      this.draggingMoved = false;
+      this.draggingMeasurements = [];
+      this.draggingDeltaLabel = null;
+      this.skipNextClick = false;
+      return;
+    }
+    if (this.dragging) {
+      if (this.dragging.kind === 'wall-body') {
+        this.dragging.walls.forEach(entry => {
+          entry.wall.a = { ...entry.originalA };
+          entry.wall.b = { ...entry.originalB };
+        });
+        this.invalidate3dCache();
+        if (this.viewPort === '3d') {
+          this.scheduleFrame();
+        }
+      }
+      this.dragging = null;
+      this.draggingMoved = false;
+      this.draggingMeasurements = [];
+      this.draggingDeltaLabel = null;
+      this.skipNextClick = false;
+    }
+    if(this.creating){
+      if(this.mode==='wall'){ this.finishWallDrawing(); }
+      else if(this.mode==='room'){ this.creating=false; this.draftA=null; this.draftB=null; }
+    }
+    if (this.mode !== 'wall') {
+      this.guideOverlay = null;
+    }
   }
 
   private finishDragGesture(): void {
-    this.draggingMeasurements = [];
-    this.draggingDeltaLabel = null;
     const drag = this.dragging;
     const moved = this.draggingMoved;
-    if (!drag || drag.kind !== 'wall-node') {
-      this.dragging = null;
-      this.draggingMoved = false;
-      return;
-    }
-    const impactedWalls = drag.anchors.map(anchor => anchor.wall);
     this.dragging = null;
     this.draggingMoved = false;
-    if (!moved) {
+    this.draggingMeasurements = [];
+    this.draggingDeltaLabel = null;
+    if (moved) {
+      this.skipNextClick = true;
+    }
+    if (!drag) {
       return;
     }
-    this.reconcileWallGeometry(impactedWalls);
+    if (drag.kind === 'wall-node') {
+      if (!moved) {
+        return;
+      }
+      const impactedWalls = drag.anchors.map(anchor => anchor.wall);
+      this.reconcileWallGeometry(impactedWalls);
+      return;
+    }
+    if (drag.kind === 'wall-body') {
+      if (!moved) {
+        drag.walls.forEach(entry => {
+          entry.wall.a = { ...entry.originalA };
+          entry.wall.b = { ...entry.originalB };
+        });
+        this.updateSelectedWallPoint();
+        this.pendingIntersection = null;
+        this.guideOverlay = null;
+        this.invalidate3dCache();
+        if (this.viewPort === '3d') {
+          this.scheduleFrame();
+        }
+        return;
+      }
+      const impactedWalls = drag.walls.map(entry => entry.wall);
+      this.reconcileWallGeometry(impactedWalls);
+      this.updateSelectedWallPoint();
+      return;
+    }
+    if (drag.kind === 'room-corner') {
+      if (moved) {
+        this.rebuildMeshes();
+        this.invalidate3dCache();
+        if (this.viewPort === '3d') {
+          this.scheduleFrame();
+        }
+      }
+    }
   }
   @HostListener('window:keydown', ['$event'])
   handleGlobalShortcut(event: KeyboardEvent): void {
@@ -1550,6 +1669,31 @@ export class DesignStudioPage implements OnInit, OnDestroy {
           const text = `${this.formatSignedLength(dx)} ΔX · ${this.formatSignedLength(dy)} ΔY`;
           this.draggingDeltaLabel = {
             position: { x: node.x + 40, y: node.y - 40 },
+            text
+          };
+        } else {
+          this.draggingDeltaLabel = null;
+        }
+      } else {
+        this.draggingDeltaLabel = null;
+      }
+      return;
+    }
+    if (drag.kind === 'wall-body') {
+      const segments = drag.walls.map(entry => ({
+        id: `drag-body-${entry.wall.id}`,
+        a: { x: entry.wall.a.x, y: entry.wall.a.y },
+        b: { x: entry.wall.b.x, y: entry.wall.b.y },
+        length: this.segLen(entry.wall.a, entry.wall.b)
+      }));
+      this.draggingMeasurements = segments;
+      if (drag.walls.length) {
+        const dx = drag.walls[0].wall.a.x - drag.walls[0].originalA.x;
+        const dy = drag.walls[0].wall.a.y - drag.walls[0].originalA.y;
+        if (Math.abs(dx) > 0.5 || Math.abs(dy) > 0.5) {
+          const text = `${this.formatSignedLength(dx)} ΔX · ${this.formatSignedLength(dy)} ΔY`;
+          this.draggingDeltaLabel = {
+            position: { x: drag.start.x + dx + 40, y: drag.start.y + dy - 40 },
             text
           };
         } else {

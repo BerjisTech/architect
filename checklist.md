@@ -256,10 +256,10 @@ Build a comprehensive real estate and construction platform at architect.berjis.
   - [x] Selection bounding box
   - [x] Display wall properties on selection
 - [ ] Create wall editing tools:
-  - Drag endpoints to resize wall
-  - Drag wall body to move entire wall
+  - [x] Drag endpoints to resize wall
+  - [x] Drag wall body to move entire wall
   - Snap to other walls while dragging
-  - Maintain intersections when moving walls
+  - [x] Maintain intersections when moving walls
   - [x] Show dimension guides while moving
 - [ ] Implement wall deletion:
   - Delete key or right-click context menu
