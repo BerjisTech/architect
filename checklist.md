@@ -139,13 +139,13 @@ Build a comprehensive real estate and construction platform at architect.berjis.
 - [x] Add category-specific filters and attributes
 
 ### 4.2 Search & Discovery
-- [ ] Implement full-text search functionality
-- [ ] Create advanced filtering system:
-  - By category/subcategory
-  - By location/distance
-  - By price range
-  - By rating/reviews
-  - By availability
+- [x] Implement full-text search functionality
+- [x] Create advanced filtering system:
+  - [x] By category/subcategory
+  - [x] By location/distance
+  - [x] By price range
+  - [x] By rating/reviews
+  - [x] By availability
   - By certifications
 - [ ] Implement geolocation-based search
 - [ ] Create search results ranking algorithm

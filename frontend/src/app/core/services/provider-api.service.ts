@@ -7,7 +7,8 @@ import {
   AvailabilitySlot,
   ServiceArea,
   Analytics,
-  OnboardingListResponse
+  OnboardingListResponse,
+  ProviderSearchResult
 } from '../../models/providers';
 import { ProviderProfileDefinition } from '../../models/profile-types';
 import { ServiceCategory } from '../../models/categories';
@@ -26,6 +27,13 @@ type ServiceAreaResponse = ApiResponse<{ areas: ServiceArea[] }>;
 type AnalyticsResponse = ApiResponse<{ analytics: Analytics }>;
 type PendingResponse = ApiResponse<OnboardingListResponse>;
 type CategoriesResponse = ApiResponse<{ categories: ServiceCategory[] }>;
+type SearchResponse = ApiResponse<{ results: ProviderSearchResult[]; meta: SearchMeta }>;
+
+interface SearchMeta {
+  limit: number;
+  offset: number;
+  count: number;
+}
 
 @Injectable({ providedIn: 'root' })
 export class ProviderApiService {
@@ -72,6 +80,53 @@ export class ProviderApiService {
     }
     return this.http.get<ListingsResponse>(`${this.base}/listings`, {
       params: httpParams,
+      withCredentials: true
+    });
+  }
+
+  searchListings(filters: ProviderSearchFilters): Observable<SearchResponse> {
+    let params = new HttpParams();
+    if (filters.query) {
+      params = params.set('q', filters.query);
+    }
+    (filters.categories ?? []).forEach(category => {
+      params = params.append('category', category);
+    });
+    (filters.subcategories ?? []).forEach(subcategory => {
+      params = params.append('subcategory', subcategory);
+    });
+    (filters.countries ?? []).forEach(country => {
+      params = params.append('country', country);
+    });
+    if (filters.region) {
+      params = params.set('region', filters.region);
+    }
+    if (filters.minPrice != null) {
+      params = params.set('minPrice', filters.minPrice.toString());
+    }
+    if (filters.maxPrice != null) {
+      params = params.set('maxPrice', filters.maxPrice.toString());
+    }
+    if (filters.minRating != null) {
+      params = params.set('minRating', filters.minRating.toString());
+    }
+    if (filters.dayOfWeek != null) {
+      params = params.set('dayOfWeek', filters.dayOfWeek.toString());
+    }
+    if (filters.startMinute != null) {
+      params = params.set('startMinute', filters.startMinute.toString());
+    }
+    if (filters.endMinute != null) {
+      params = params.set('endMinute', filters.endMinute.toString());
+    }
+    if (filters.limit != null) {
+      params = params.set('limit', filters.limit.toString());
+    }
+    if (filters.offset != null) {
+      params = params.set('offset', filters.offset.toString());
+    }
+    return this.http.get<SearchResponse>(`${this.base}/search`, {
+      params,
       withCredentials: true
     });
   }
@@ -158,4 +213,20 @@ export interface ServiceAreaRequest {
   region: string;
   countryCode?: string | null;
   notes?: string | null;
+}
+
+export interface ProviderSearchFilters {
+  query?: string;
+  categories?: string[];
+  subcategories?: string[];
+  countries?: string[];
+  region?: string;
+  minPrice?: number;
+  maxPrice?: number;
+  minRating?: number;
+  dayOfWeek?: number;
+  startMinute?: number;
+  endMinute?: number;
+  limit?: number;
+  offset?: number;
 }

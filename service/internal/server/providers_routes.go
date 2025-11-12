@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"math"
 	"net/http"
 	"strconv"
 	"strings"
@@ -48,6 +49,7 @@ func registerProviderRoutes(
 	}
 
 	// Public endpoints
+	public.Get("/providers/search", h.searchProviders)
 	public.Get("/providers/categories", h.listCategories)
 	public.Get("/providers/listings", h.listPublicListings)
 
@@ -73,6 +75,97 @@ func registerProviderRoutes(
 
 	protected.Post("/providers/response-events", h.recordResponseEvent)
 	protected.Get("/providers/analytics", h.getAnalytics)
+}
+
+// Search ------------------------------------------------------------------------
+
+func (h providerHandler) searchProviders(c *fiber.Ctx) error {
+	filters := providers.SearchFilters{
+		Query: strings.TrimSpace(c.Query("q")),
+	}
+	filters.Categories = queryList(c, "category")
+	filters.Subcategories = queryList(c, "subcategory")
+	filters.CountryCodes = queryList(c, "country")
+	filters.Region = strings.TrimSpace(c.Query("region"))
+
+	if v := strings.TrimSpace(c.Query("limit")); v != "" {
+		limit, err := strconv.Atoi(v)
+		if err != nil {
+			return badRequest(c, "limit must be a number")
+		}
+		filters.Limit = limit
+	}
+	if v := strings.TrimSpace(c.Query("offset")); v != "" {
+		offset, err := strconv.Atoi(v)
+		if err != nil {
+			return badRequest(c, "offset must be a number")
+		}
+		filters.Offset = offset
+	}
+
+	if v := strings.TrimSpace(c.Query("minPrice")); v != "" {
+		minPrice, err := strconv.ParseFloat(v, 64)
+		if err != nil {
+			return badRequest(c, "minPrice must be numeric")
+		}
+		filters.MinPriceCents = int64(math.Round(minPrice * 100))
+	}
+	if v := strings.TrimSpace(c.Query("maxPrice")); v != "" {
+		maxPrice, err := strconv.ParseFloat(v, 64)
+		if err != nil {
+			return badRequest(c, "maxPrice must be numeric")
+		}
+		filters.MaxPriceCents = int64(math.Round(maxPrice * 100))
+	}
+	if v := strings.TrimSpace(c.Query("minRating")); v != "" {
+		minRating, err := strconv.ParseFloat(v, 64)
+		if err != nil {
+			return badRequest(c, "minRating must be numeric")
+		}
+		filters.MinRating = minRating
+	}
+
+	if v := strings.TrimSpace(c.Query("dayOfWeek")); v != "" {
+		day, err := strconv.Atoi(v)
+		if err != nil {
+			return badRequest(c, "dayOfWeek must be numeric")
+		}
+		filters.DayOfWeek = &day
+	}
+	if v := strings.TrimSpace(c.Query("startMinute")); v != "" {
+		start, err := strconv.Atoi(v)
+		if err != nil {
+			return badRequest(c, "startMinute must be numeric")
+		}
+		filters.StartMinute = &start
+	}
+	if v := strings.TrimSpace(c.Query("endMinute")); v != "" {
+		end, err := strconv.Atoi(v)
+		if err != nil {
+			return badRequest(c, "endMinute must be numeric")
+		}
+		filters.EndMinute = &end
+	}
+
+	results, err := h.store.SearchPublicListings(c.Context(), filters)
+	if err != nil {
+		if isCategoryValidationError(err) {
+			return badRequest(c, err.Error())
+		}
+		return serverError(c, err)
+	}
+
+	return c.JSON(fiber.Map{
+		"success": true,
+		"data": fiber.Map{
+			"results": results,
+			"meta": fiber.Map{
+				"limit":  limitOrDefault(filters.Limit),
+				"offset": filters.Offset,
+				"count":  len(results),
+			},
+		},
+	})
 }
 
 // Categories --------------------------------------------------------------------
@@ -495,6 +588,32 @@ func isCategoryValidationError(err error) bool {
 		return true
 	}
 	return strings.HasPrefix(err.Error(), "categories:")
+}
+
+func queryList(c *fiber.Ctx, key string) []string {
+	var values []string
+	args := c.Context().QueryArgs()
+	if args == nil {
+		return values
+	}
+	args.VisitAll(func(k, v []byte) {
+		if strings.EqualFold(string(k), key) {
+			parts := strings.Split(string(v), ",")
+			for _, part := range parts {
+				if trimmed := strings.TrimSpace(part); trimmed != "" {
+					values = append(values, trimmed)
+				}
+			}
+		}
+	})
+	return values
+}
+
+func limitOrDefault(limit int) int {
+	if limit <= 0 || limit > 100 {
+		return 20
+	}
+	return limit
 }
 
 // Helpers ------------------------------------------------------------------------

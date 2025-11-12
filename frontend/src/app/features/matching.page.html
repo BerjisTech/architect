@@ -1,11 +1,148 @@
-<section class="container section">
-  <h1 class="text-2xl font-semibold text-slate-900">Professional Matching</h1>
-  <p class="mt-2 max-w-2xl text-sm text-slate-600">Curated teams matched to your scope, style, location, and budget.</p>
-  <div class="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-    <div class="rounded-2xl border border-slate-200 bg-white/90 p-4 elev-soft hover-rise" *ngFor="let p of demo">
-      <div class="text-sm font-semibold text-slate-900">{{p.name}}</div>
-      <div class="text-xs text-slate-600">{{p.specialty}} · {{p.city}}</div>
-      <button class="mt-3 btn-ghost">View Profile</button>
+<section class="container section space-y-8">
+  <header class="space-y-2">
+    <h1 class="text-3xl font-semibold text-slate-900">Find Specialists</h1>
+    <p class="max-w-2xl text-sm text-slate-600">
+      Search verified providers across architecture, construction, surveying, legal and logistics services.
+      Refine results by category, location, price range, rating, and availability to match your project needs.
+    </p>
+  </header>
+
+  <form class="rounded-2xl border border-slate-200 bg-white/80 p-6 space-y-6 elev-soft" [formGroup]="filtersForm" (ngSubmit)="search()">
+    <div class="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+      <label>
+        <span>Keywords</span>
+        <input type="text" formControlName="query" placeholder="Search by service, skills, or keywords" />
+      </label>
+
+      <label>
+        <span>Category</span>
+        <select formControlName="category">
+          <option value="">All categories</option>
+          <option *ngFor="let category of categories" [value]="category.key">{{ category.name }}</option>
+        </select>
+      </label>
+
+      <label>
+        <span>Subcategory</span>
+        <select formControlName="subcategory">
+          <option value="">All specialisations</option>
+          <option *ngFor="let sub of subcategories" [value]="sub.key">{{ sub.name }}</option>
+        </select>
+      </label>
+
+      <label>
+        <span>Country</span>
+        <input type="text" formControlName="country" placeholder="e.g., KE, UG, TZ" />
+      </label>
+
+      <label>
+        <span>Region / City</span>
+        <input type="text" formControlName="region" placeholder="City, county, or region" />
+      </label>
+
+      <label>
+        <span>Min Price (USD)</span>
+        <input type="number" formControlName="minPrice" min="0" step="0.01" />
+      </label>
+
+      <label>
+        <span>Max Price (USD)</span>
+        <input type="number" formControlName="maxPrice" min="0" step="0.01" />
+      </label>
+
+      <label>
+        <span>Min Rating</span>
+        <input type="number" formControlName="minRating" min="0" max="5" step="0.1" />
+      </label>
+
+      <label>
+        <span>Availability Day</span>
+        <select formControlName="dayOfWeek">
+          <option [ngValue]="null">Any day</option>
+          <option *ngFor="let day of ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday']; let idx = index" [value]="idx">
+            {{ day }}
+          </option>
+        </select>
+      </label>
+
+      <label>
+        <span>Earliest Time (minute)</span>
+        <input type="number" formControlName="startMinute" min="0" max="1440" step="15" />
+      </label>
+
+      <label>
+        <span>Latest Time (minute)</span>
+        <input type="number" formControlName="endMinute" min="0" max="1440" step="15" />
+      </label>
     </div>
+
+    <div class="flex flex-wrap items-center gap-4">
+      <button type="submit" class="btn-primary" [disabled]="loading">
+        {{ loading ? 'Searching…' : 'Search Providers' }}
+      </button>
+      <button type="button" class="btn-ghost" (click)="resetFilters()" [disabled]="loading">
+        Reset Filters
+      </button>
+      <span class="text-xs text-slate-500" *ngIf="initialized">
+        Showing {{ resultMeta.count }} providers · limit {{ resultMeta.limit }}
+      </span>
+    </div>
+  </form>
+
+  <div *ngIf="error" class="alert alert--error">
+    {{ error }}
+  </div>
+
+  <div *ngIf="!error && !loading && results.length === 0" class="rounded-2xl border border-dashed border-slate-300 bg-white/60 p-6 text-center">
+    <h2>No providers found</h2>
+    <p>Try adjusting your filters or broaden the search criteria.</p>
+  </div>
+
+  <div *ngIf="results.length" class="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+    <article *ngFor="let result of results" class="rounded-2xl border border-slate-200 bg-white/90 p-5 space-y-4 transition-shadow hover:shadow-lg">
+      <header class="space-y-1">
+        <h3 class="text-lg font-semibold text-slate-900">{{ result.listing.title }}</h3>
+        <p class="text-sm text-slate-600">
+          {{ categoryLabel(result) }}
+          <ng-container *ngIf="subcategoryLabel(result) as sub">
+            • {{ sub }}
+          </ng-container>
+        </p>
+      </header>
+
+      <p class="text-sm text-slate-600" *ngIf="result.listing.summary">{{ result.listing.summary }}</p>
+
+      <dl class="grid grid-cols-2 gap-3 text-xs text-slate-600">
+        <div>
+          <dt>Pricing</dt>
+          <dd>
+            {{ result.listing.pricingModel | titlecase }} ·
+            {{ (result.listing.basePriceCents / 100) | currency:'USD':'symbol':'1.0-0' }}
+          </dd>
+        </div>
+        <div>
+          <dt>Rating</dt>
+          <dd>
+            <ng-container *ngIf="result.reviewCount > 0; else unrated">
+              {{ result.averageRating | number:'1.1-1' }} ★ ({{ result.reviewCount }})
+            </ng-container>
+            <ng-template #unrated>Not yet rated</ng-template>
+          </dd>
+        </div>
+        <div *ngIf="result.location">
+          <dt>Location</dt>
+          <dd>{{ result.location }}</dd>
+        </div>
+        <div *ngIf="result.displayName">
+          <dt>Provider</dt>
+          <dd>{{ result.displayName }}</dd>
+        </div>
+      </dl>
+
+      <footer class="flex flex-wrap gap-3">
+        <span class="inline-flex items-center rounded-full bg-slate-100 px-3 py-1 text-xs font-medium text-slate-700">{{ result.profileType | titlecase }}</span>
+        <a class="btn-ghost" [routerLink]="['/profiles', result.listing.userUuid]">View Profile</a>
+      </footer>
+    </article>
   </div>
 </section>

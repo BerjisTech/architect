@@ -58,3 +58,12 @@ export interface Analytics {
 export interface OnboardingListResponse {
   requests: OnboardingStatus[];
 }
+
+export interface ProviderSearchResult {
+  listing: Listing;
+  displayName?: string | null;
+  profileType: string;
+  location?: string | null;
+  averageRating: number;
+  reviewCount: number;
+}

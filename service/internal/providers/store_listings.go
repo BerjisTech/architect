@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 )
@@ -43,6 +44,33 @@ type ListingInput struct {
 	Currency       string         `json:"currency"`
 	Status         string         `json:"status"`
 	Attributes     map[string]any `json:"attributes"`
+}
+
+// SearchFilters describe discovery options for public listings.
+type SearchFilters struct {
+	Query         string
+	Categories    []string
+	Subcategories []string
+	CountryCodes  []string
+	Region        string
+	MinPriceCents int64
+	MaxPriceCents int64
+	MinRating     float64
+	DayOfWeek     *int
+	StartMinute   *int
+	EndMinute     *int
+	Limit         int
+	Offset        int
+}
+
+// SearchResult wraps a listing with enriched discovery metadata.
+type SearchResult struct {
+	Listing       Listing `json:"listing"`
+	DisplayName   *string `json:"displayName,omitempty"`
+	ProfileType   string  `json:"profileType"`
+	Location      *string `json:"location,omitempty"`
+	AverageRating float64 `json:"averageRating"`
+	ReviewCount   int     `json:"reviewCount"`
 }
 
 // AvailabilitySlot models weekly availability for a listing.
@@ -218,6 +246,195 @@ func (s *Store) ListPublicListings(ctx context.Context, limit int) ([]Listing, e
 	return listings, nil
 }
 
+// SearchPublicListings returns listings that satisfy the provided discovery filters.
+func (s *Store) SearchPublicListings(ctx context.Context, filters SearchFilters) ([]SearchResult, error) {
+	limit := filters.Limit
+	if limit <= 0 || limit > 100 {
+		limit = 20
+	}
+	offset := filters.Offset
+	if offset < 0 {
+		offset = 0
+	}
+	if filters.MaxPriceCents > 0 && filters.MinPriceCents > 0 && filters.MaxPriceCents < filters.MinPriceCents {
+		filters.MinPriceCents, filters.MaxPriceCents = filters.MaxPriceCents, filters.MinPriceCents
+	}
+	if filters.DayOfWeek != nil {
+		day := *filters.DayOfWeek
+		if day < 0 || day > 6 {
+			return nil, errors.New("categories: dayOfWeek must be between 0 and 6")
+		}
+		if filters.StartMinute != nil && (*filters.StartMinute < 0 || *filters.StartMinute > 1440) {
+			return nil, errors.New("categories: startMinute must be between 0 and 1440")
+		}
+		if filters.EndMinute != nil && (*filters.EndMinute < 0 || *filters.EndMinute > 1440) {
+			return nil, errors.New("categories: endMinute must be between 0 and 1440")
+		}
+		if filters.StartMinute != nil && filters.EndMinute != nil && *filters.StartMinute > *filters.EndMinute {
+			start := *filters.StartMinute
+			end := *filters.EndMinute
+			filters.StartMinute = &end
+			filters.EndMinute = &start
+		}
+	}
+
+	var (
+		args       []any
+		conditions []string
+	)
+
+	baseQuery := strings.Builder{}
+	baseQuery.WriteString(`
+		SELECT
+			l.id, l.user_uuid, l.title, l.summary, l.description, l.category, l.subcategory,
+			l.pricing_model, l.base_price_cents, l.currency, l.status, l.attributes,
+			l.created_at, l.updated_at,
+			COALESCE(r.avg_rating, 0) AS average_rating,
+			COALESCE(r.review_count, 0) AS review_count,
+			p.display_name,
+			p.profile_type,
+			p.location
+		FROM service_listings l
+		INNER JOIN profiles p ON p.user_uuid = l.user_uuid
+		LEFT JOIN (
+			SELECT user_uuid, AVG(rating)::float AS avg_rating, COUNT(*) AS review_count
+			FROM profile_reviews
+			GROUP BY user_uuid
+		) r ON r.user_uuid = l.user_uuid
+		WHERE l.status = 'active'
+	`)
+
+	if q := strings.TrimSpace(filters.Query); q != "" {
+		args = append(args, q)
+		placeholder := fmt.Sprintf("$%d", len(args))
+		conditions = append(conditions, fmt.Sprintf(`to_tsvector('simple', coalesce(l.title,'') || ' ' || coalesce(l.summary,'') || ' ' || coalesce(l.description,'')) @@ plainto_tsquery('simple', %s)`, placeholder))
+	}
+
+	if clause := appendStringList(&args, filters.Categories); clause != "" {
+		conditions = append(conditions, fmt.Sprintf("l.category IN (%s)", clause))
+	}
+	if clause := appendStringList(&args, filters.Subcategories); clause != "" {
+		conditions = append(conditions, fmt.Sprintf("l.subcategory IN (%s)", clause))
+	}
+
+	if filters.MinPriceCents > 0 {
+		args = append(args, filters.MinPriceCents)
+		conditions = append(conditions, fmt.Sprintf("l.base_price_cents >= $%d", len(args)))
+	}
+	if filters.MaxPriceCents > 0 {
+		args = append(args, filters.MaxPriceCents)
+		conditions = append(conditions, fmt.Sprintf("l.base_price_cents <= $%d", len(args)))
+	}
+	if filters.MinRating > 0 {
+		args = append(args, filters.MinRating)
+		conditions = append(conditions, fmt.Sprintf("COALESCE(r.avg_rating, 0) >= $%d", len(args)))
+	}
+	if strings.TrimSpace(filters.Region) != "" {
+		args = append(args, strings.ToLower(strings.TrimSpace(filters.Region)))
+		conditions = append(conditions, fmt.Sprintf(`EXISTS (SELECT 1 FROM service_areas sa WHERE sa.listing_id = l.id AND LOWER(sa.region) = $%d)`, len(args)))
+	}
+	if clause := appendStringList(&args, filters.CountryCodes); clause != "" {
+		conditions = append(conditions, fmt.Sprintf(`EXISTS (SELECT 1 FROM service_areas sa WHERE sa.listing_id = l.id AND LOWER(sa.country_code) IN (%s))`, clause))
+	}
+	if filters.DayOfWeek != nil {
+		args = append(args, *filters.DayOfWeek)
+		dayPlaceholder := fmt.Sprintf("$%d", len(args))
+		timeConditions := []string{fmt.Sprintf("sa.day_of_week = %s", dayPlaceholder)}
+		if filters.StartMinute != nil {
+			args = append(args, *filters.StartMinute)
+			timeConditions = append(timeConditions, fmt.Sprintf("sa.start_minutes <= $%d", len(args)))
+		}
+		if filters.EndMinute != nil {
+			args = append(args, *filters.EndMinute)
+			timeConditions = append(timeConditions, fmt.Sprintf("sa.end_minutes >= $%d", len(args)))
+		}
+		conditions = append(conditions, fmt.Sprintf(`EXISTS (SELECT 1 FROM service_availability sa WHERE sa.listing_id = l.id AND %s)`, strings.Join(timeConditions, " AND ")))
+	}
+
+	if len(conditions) > 0 {
+		baseQuery.WriteString(" AND ")
+		baseQuery.WriteString(strings.Join(conditions, " AND "))
+	}
+
+	args = append(args, limit, offset)
+	baseQuery.WriteString(fmt.Sprintf(" ORDER BY COALESCE(r.avg_rating, 0) DESC, l.updated_at DESC LIMIT $%d OFFSET $%d", len(args)-1, len(args)))
+
+	rows, err := s.db.QueryxContext(ctx, baseQuery.String(), args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var results []SearchResult
+	for rows.Next() {
+		var (
+			listingID      string
+			userUUID       string
+			title          string
+			summary        sql.NullString
+			description    sql.NullString
+			category       string
+			subcategory    sql.NullString
+			pricingModel   string
+			basePriceCents int64
+			currency       string
+			status         string
+			attributesJSON []byte
+			createdAt      time.Time
+			updatedAt      time.Time
+			avgRating      sql.NullFloat64
+			reviewCount    sql.NullInt64
+			displayName    sql.NullString
+			profileType    string
+			location       sql.NullString
+		)
+		if err := rows.Scan(
+			&listingID, &userUUID, &title, &summary, &description, &category, &subcategory,
+			&pricingModel, &basePriceCents, &currency, &status, &attributesJSON, &createdAt, &updatedAt,
+			&avgRating, &reviewCount, &displayName, &profileType, &location,
+		); err != nil {
+			return nil, err
+		}
+		listing := Listing{
+			ID:             listingID,
+			UserUUID:       userUUID,
+			Title:          title,
+			Summary:        nullableStringPtr(summary),
+			Description:    nullableStringPtr(description),
+			Category:       category,
+			Subcategory:    nullableStringPtr(subcategory),
+			PricingModel:   pricingModel,
+			BasePriceCents: basePriceCents,
+			Currency:       currency,
+			Status:         status,
+			CreatedAt:      createdAt,
+			UpdatedAt:      updatedAt,
+			Attributes:     map[string]any{},
+		}
+		if len(attributesJSON) > 0 {
+			var attrs map[string]any
+			if err := json.Unmarshal(attributesJSON, &attrs); err == nil && attrs != nil {
+				listing.Attributes = attrs
+			}
+		}
+		result := SearchResult{
+			Listing:       listing,
+			DisplayName:   nullableStringPtr(displayName),
+			ProfileType:   profileType,
+			Location:      nullableStringPtr(location),
+			AverageRating: 0,
+			ReviewCount:   0,
+		}
+		if avgRating.Valid {
+			result.AverageRating = avgRating.Float64
+		}
+		if reviewCount.Valid {
+			result.ReviewCount = int(reviewCount.Int64)
+		}
+		results = append(results, result)
+	}
+	return results, rows.Err()
+}
 func (s *Store) GetAvailability(ctx context.Context, listingID string) ([]AvailabilitySlot, error) {
 	rows, err := s.db.QueryxContext(ctx, `
 		SELECT id, listing_id, day_of_week, start_minutes, end_minutes, created_at, updated_at
@@ -491,6 +708,22 @@ func nullableStringPtr(value sql.NullString) *string {
 		return nil
 	}
 	return &trimmed
+}
+
+func appendStringList(args *[]any, values []string) string {
+	if len(values) == 0 {
+		return ""
+	}
+	placeholders := make([]string, 0, len(values))
+	for _, value := range values {
+		trimmed := strings.TrimSpace(strings.ToLower(value))
+		if trimmed == "" {
+			continue
+		}
+		*args = append(*args, trimmed)
+		placeholders = append(placeholders, fmt.Sprintf("$%d", len(*args)))
+	}
+	return strings.Join(placeholders, ",")
 }
 
 func (s *Store) validateCategory(ctx context.Context, category string, subcategory *string, attrs map[string]any) (string, *string, map[string]any, error) {
