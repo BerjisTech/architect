@@ -9,6 +9,7 @@ import (
 
 	"github.com/jmoiron/sqlx"
 
+	"github.com/berjistech/berjis-ecosystem/architect/service/internal/categories"
 	"github.com/berjistech/berjis-ecosystem/architect/service/internal/profile"
 	"github.com/berjistech/berjis-ecosystem/architect/service/internal/users"
 )
@@ -22,10 +23,20 @@ var (
 type Store struct {
 	db      *sqlx.DB
 	profile *profile.Store
+	cats    *categories.Store
 }
 
 func NewStore(db *sqlx.DB) *Store {
-	return &Store{db: db, profile: profile.NewStore(db)}
+	return &Store{
+		db:      db,
+		profile: profile.NewStore(db),
+		cats:    categories.NewStore(db),
+	}
+}
+
+// Categories exposes the category store for consumers that need taxonomy metadata.
+func (s *Store) Categories() *categories.Store {
+	return s.cats
 }
 
 type OnboardingStatus struct {

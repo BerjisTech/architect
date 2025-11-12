@@ -62,7 +62,11 @@
           <div>
             <strong>{{ listing.title }}</strong>
             <p class="meta">
-              {{ listing.category | titlecase }} | {{ listing.pricingModel | titlecase }} | {{ listing.status | titlecase }}
+              {{ categoryLabel(listing) }}
+              <ng-container *ngIf="listing.subcategory">
+                • {{ subcategoryLabel(listing) }}
+              </ng-container>
+              | {{ listing.pricingModel | titlecase }} | {{ listing.status | titlecase }}
             </p>
           </div>
           <div class="actions">
@@ -81,7 +85,14 @@
           <label>Title<input type="text" formControlName="title" /></label>
           <label>Category
             <select formControlName="category">
-              <option *ngFor="let option of categories" [value]="option">{{ option | titlecase }}</option>
+              <option value="" disabled>Select category</option>
+              <option *ngFor="let category of categories" [value]="category.key">{{ category.name }}</option>
+            </select>
+          </label>
+          <label>Subcategory
+            <select formControlName="subcategory">
+              <option value="">All subcategories</option>
+              <option *ngFor="let sub of subcategoryOptions" [value]="sub.key">{{ sub.name }}</option>
             </select>
           </label>
           <label>Pricing Model
@@ -106,6 +117,40 @@
           <label class="span-2">Description
             <textarea rows="4" formControlName="description"></textarea>
           </label>
+          <div class="span-2 attribute-fields" *ngIf="attributeDefinitions.length">
+            <h3>Category Attributes</h3>
+            <div class="attribute-grid">
+              <label *ngFor="let attribute of attributeDefinitions" [ngSwitch]="attribute.dataType">
+                <span>
+                  {{ attribute.label }}
+                  <span *ngIf="attribute.required" class="required">*</span>
+                </span>
+                <ng-container [ngSwitchCase]="'boolean'">
+                  <div class="checkbox-field inline">
+                    <input type="checkbox" [formControl]="attributeControl(attribute)" />
+                    <span>Enabled</span>
+                  </div>
+                </ng-container>
+                <ng-container [ngSwitchCase]="'multiselect'">
+                  <select multiple [formControl]="attributeControl(attribute)">
+                    <option *ngFor="let option of attributeOptions(attribute)" [value]="option">{{ option }}</option>
+                  </select>
+                </ng-container>
+                <ng-container [ngSwitchCase]="'enum'">
+                  <select [formControl]="attributeControl(attribute)">
+                    <option value="">Select option</option>
+                    <option *ngFor="let option of attributeOptions(attribute)" [value]="option">{{ option }}</option>
+                  </select>
+                </ng-container>
+                <ng-container [ngSwitchCase]="'number'">
+                  <input type="number" [formControl]="attributeControl(attribute)" />
+                </ng-container>
+                <ng-container *ngSwitchDefault>
+                  <input type="text" [formControl]="attributeControl(attribute)" />
+                </ng-container>
+              </label>
+            </div>
+          </div>
         </div>
         <button type="submit" [disabled]="listingForm.invalid || saving">
           {{ saving ? 'Saving...' : (listingForm.value.id ? 'Update Listing' : 'Create Listing') }}

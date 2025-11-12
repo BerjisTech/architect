@@ -10,6 +10,7 @@ import {
   OnboardingListResponse
 } from '../../models/providers';
 import { ProviderProfileDefinition } from '../../models/profile-types';
+import { ServiceCategory } from '../../models/categories';
 
 interface ApiResponse<T> {
   success: boolean;
@@ -24,6 +25,7 @@ type AvailabilityResponse = ApiResponse<{ slots: AvailabilitySlot[] }>;
 type ServiceAreaResponse = ApiResponse<{ areas: ServiceArea[] }>;
 type AnalyticsResponse = ApiResponse<{ analytics: Analytics }>;
 type PendingResponse = ApiResponse<OnboardingListResponse>;
+type CategoriesResponse = ApiResponse<{ categories: ServiceCategory[] }>;
 
 @Injectable({ providedIn: 'root' })
 export class ProviderApiService {
@@ -53,6 +55,10 @@ export class ProviderApiService {
       { stage, notes },
       { withCredentials: true }
     );
+  }
+
+  getCategories(): Observable<CategoriesResponse> {
+    return this.http.get<CategoriesResponse>(`${this.base}/categories`, { withCredentials: true });
   }
 
   listMyListings(): Observable<ListingsResponse> {
@@ -134,10 +140,12 @@ export interface ListingRequest {
   summary?: string | null;
   description?: string | null;
   category: string;
+  subcategory?: string | null;
   pricingModel: string;
   basePriceCents: number;
   currency: string;
   status: string;
+  attributes?: Record<string, unknown>;
 }
 
 export interface AvailabilitySlotRequest {

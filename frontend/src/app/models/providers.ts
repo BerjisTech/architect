@@ -17,10 +17,12 @@ export interface Listing {
   summary?: string | null;
   description?: string | null;
   category: string;
+  subcategory?: string | null;
   pricingModel: string;
   basePriceCents: number;
   currency: string;
   status: string;
+  attributes: Record<string, unknown>;
   createdAt: string;
   updatedAt: string;
 }

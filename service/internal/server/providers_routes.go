@@ -13,16 +13,18 @@ import (
 	"github.com/jmoiron/sqlx"
 
 	"github.com/berjistech/berjis-ecosystem/architect/service/internal/auth"
+	"github.com/berjistech/berjis-ecosystem/architect/service/internal/categories"
 	"github.com/berjistech/berjis-ecosystem/architect/service/internal/coreapi"
 	"github.com/berjistech/berjis-ecosystem/architect/service/internal/providers"
 	"github.com/berjistech/berjis-ecosystem/architect/service/internal/users"
 )
 
 type providerHandler struct {
-	store *providers.Store
-	db    *sqlx.DB
-	core  *coreapi.Client
-	log   *slog.Logger
+	store      *providers.Store
+	db         *sqlx.DB
+	core       *coreapi.Client
+	log        *slog.Logger
+	categories *categories.Store
 }
 
 func registerProviderRoutes(
@@ -33,14 +35,20 @@ func registerProviderRoutes(
 	coreClient *coreapi.Client,
 	logger *slog.Logger,
 ) {
+	catStore := store.Categories()
+	if catStore == nil && db != nil {
+		catStore = categories.NewStore(db)
+	}
 	h := providerHandler{
-		store: store,
-		db:    db,
-		core:  coreClient,
-		log:   logger,
+		store:      store,
+		db:         db,
+		core:       coreClient,
+		log:        logger,
+		categories: catStore,
 	}
 
 	// Public endpoints
+	public.Get("/providers/categories", h.listCategories)
 	public.Get("/providers/listings", h.listPublicListings)
 
 	// Authenticated provider endpoints
@@ -53,6 +61,9 @@ func registerProviderRoutes(
 	protected.Post("/providers/listings", h.createListing)
 	protected.Put("/providers/listings/:id", h.updateListing)
 	protected.Delete("/providers/listings/:id", h.deleteListing)
+	protected.Post("/providers/categories", h.upsertCategory)
+	protected.Post("/providers/categories/:categoryKey/subcategories", h.upsertSubcategory)
+	protected.Post("/providers/categories/:categoryKey/attributes", h.upsertAttribute)
 
 	protected.Get("/providers/listings/:id/availability", h.getAvailability)
 	protected.Put("/providers/listings/:id/availability", h.setAvailability)
@@ -62,6 +73,123 @@ func registerProviderRoutes(
 
 	protected.Post("/providers/response-events", h.recordResponseEvent)
 	protected.Get("/providers/analytics", h.getAnalytics)
+}
+
+// Categories --------------------------------------------------------------------
+
+func (h providerHandler) listCategories(c *fiber.Ctx) error {
+	if h.categories == nil {
+		return serverError(c, errors.New("categories store unavailable"))
+	}
+	cats, err := h.categories.List(c.Context())
+	if err != nil {
+		return serverError(c, err)
+	}
+	return c.JSON(fiber.Map{"success": true, "data": fiber.Map{"categories": cats}})
+}
+
+func (h providerHandler) upsertCategory(c *fiber.Ctx) error {
+	requester := auth.UserID(c)
+	if !h.isPrivileged(requester) {
+		return forbidden(c)
+	}
+	if h.categories == nil {
+		return serverError(c, errors.New("categories store unavailable"))
+	}
+	var body struct {
+		Key         string  `json:"key"`
+		Name        string  `json:"name"`
+		Description *string `json:"description"`
+		Icon        *string `json:"icon"`
+	}
+	if err := c.BodyParser(&body); err != nil {
+		return badRequest(c, "invalid body")
+	}
+	if strings.TrimSpace(body.Key) == "" || strings.TrimSpace(body.Name) == "" {
+		return badRequest(c, "key and name are required")
+	}
+	category, err := h.categories.UpsertCategory(c.Context(), body.Key, body.Name, body.Description, body.Icon)
+	if err != nil {
+		return serverError(c, err)
+	}
+	return c.JSON(fiber.Map{"success": true, "data": fiber.Map{"category": category}})
+}
+
+func (h providerHandler) upsertSubcategory(c *fiber.Ctx) error {
+	requester := auth.UserID(c)
+	if !h.isPrivileged(requester) {
+		return forbidden(c)
+	}
+	if h.categories == nil {
+		return serverError(c, errors.New("categories store unavailable"))
+	}
+	categoryKey := strings.TrimSpace(c.Params("categoryKey"))
+	if categoryKey == "" {
+		return badRequest(c, "category key required")
+	}
+	var body struct {
+		Key         string         `json:"key"`
+		Name        string         `json:"name"`
+		Description *string        `json:"description"`
+		Filters     map[string]any `json:"filters"`
+		Position    *int           `json:"position"`
+	}
+	if err := c.BodyParser(&body); err != nil {
+		return badRequest(c, "invalid body")
+	}
+	if strings.TrimSpace(body.Key) == "" || strings.TrimSpace(body.Name) == "" {
+		return badRequest(c, "key and name are required")
+	}
+	position := 0
+	if body.Position != nil && *body.Position > 0 {
+		position = *body.Position
+	}
+	sub, err := h.categories.UpsertSubcategory(c.Context(), categoryKey, body.Key, body.Name, body.Description, body.Filters, position)
+	if err != nil {
+		if errors.Is(err, categories.ErrCategoryNotFound) {
+			return notFound(c, "category not found")
+		}
+		return serverError(c, err)
+	}
+	return c.JSON(fiber.Map{"success": true, "data": fiber.Map{"subcategory": sub}})
+}
+
+func (h providerHandler) upsertAttribute(c *fiber.Ctx) error {
+	requester := auth.UserID(c)
+	if !h.isPrivileged(requester) {
+		return forbidden(c)
+	}
+	if h.categories == nil {
+		return serverError(c, errors.New("categories store unavailable"))
+	}
+	categoryKey := strings.TrimSpace(c.Params("categoryKey"))
+	if categoryKey == "" {
+		return badRequest(c, "category key required")
+	}
+	var body struct {
+		Key          string         `json:"key"`
+		Label        string         `json:"label"`
+		DataType     string         `json:"dataType"`
+		Required     bool           `json:"required"`
+		FilterConfig map[string]any `json:"filterConfig"`
+	}
+	if err := c.BodyParser(&body); err != nil {
+		return badRequest(c, "invalid body")
+	}
+	if strings.TrimSpace(body.Key) == "" || strings.TrimSpace(body.Label) == "" {
+		return badRequest(c, "key and label are required")
+	}
+	if strings.TrimSpace(body.DataType) == "" {
+		body.DataType = "string"
+	}
+	attr, err := h.categories.UpsertAttribute(c.Context(), categoryKey, body.Key, body.Label, body.DataType, body.Required, body.FilterConfig)
+	if err != nil {
+		if errors.Is(err, categories.ErrCategoryNotFound) {
+			return notFound(c, "category not found")
+		}
+		return serverError(c, err)
+	}
+	return c.JSON(fiber.Map{"success": true, "data": fiber.Map{"attribute": attr}})
 }
 
 // Onboarding ---------------------------------------------------------------------
@@ -177,6 +305,9 @@ func (h providerHandler) createListing(c *fiber.Ctx) error {
 	}
 	listing, err := h.store.CreateListing(c.Context(), status.UserUUID, body.toInput())
 	if err != nil {
+		if isCategoryValidationError(err) {
+			return badRequest(c, err.Error())
+		}
 		return serverError(c, err)
 	}
 	return c.Status(http.StatusCreated).JSON(fiber.Map{"success": true, "data": fiber.Map{"listing": listing}})
@@ -199,6 +330,9 @@ func (h providerHandler) updateListing(c *fiber.Ctx) error {
 	if err != nil {
 		if errors.Is(err, providers.ErrNotEnrolled) || errors.Is(err, providers.ErrListingNotFound) {
 			return notFound(c, "listing not found")
+		}
+		if isCategoryValidationError(err) {
+			return badRequest(c, err.Error())
 		}
 		return serverError(c, err)
 	}
@@ -351,6 +485,16 @@ func (h providerHandler) getAnalytics(c *fiber.Ctx) error {
 		return serverError(c, err)
 	}
 	return c.JSON(fiber.Map{"success": true, "data": fiber.Map{"analytics": data}})
+}
+
+func isCategoryValidationError(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, categories.ErrCategoryNotFound) || errors.Is(err, categories.ErrSubcategoryNotFound) {
+		return true
+	}
+	return strings.HasPrefix(err.Error(), "categories:")
 }
 
 // Helpers ------------------------------------------------------------------------

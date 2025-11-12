@@ -3,6 +3,7 @@ package providers
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"strings"
 	"time"
@@ -14,30 +15,34 @@ var (
 
 // Listing represents a provider service offering.
 type Listing struct {
-	ID             string    `json:"id"`
-	UserUUID       string    `json:"userUuid"`
-	Title          string    `json:"title"`
-	Summary        *string   `json:"summary,omitempty"`
-	Description    *string   `json:"description,omitempty"`
-	Category       string    `json:"category"`
-	PricingModel   string    `json:"pricingModel"`
-	BasePriceCents int64     `json:"basePriceCents"`
-	Currency       string    `json:"currency"`
-	Status         string    `json:"status"`
-	CreatedAt      time.Time `json:"createdAt"`
-	UpdatedAt      time.Time `json:"updatedAt"`
+	ID             string         `json:"id"`
+	UserUUID       string         `json:"userUuid"`
+	Title          string         `json:"title"`
+	Summary        *string        `json:"summary,omitempty"`
+	Description    *string        `json:"description,omitempty"`
+	Category       string         `json:"category"`
+	Subcategory    *string        `json:"subcategory,omitempty"`
+	PricingModel   string         `json:"pricingModel"`
+	BasePriceCents int64          `json:"basePriceCents"`
+	Currency       string         `json:"currency"`
+	Status         string         `json:"status"`
+	Attributes     map[string]any `json:"attributes"`
+	CreatedAt      time.Time      `json:"createdAt"`
+	UpdatedAt      time.Time      `json:"updatedAt"`
 }
 
 // ListingInput captures data for creating or updating listings.
 type ListingInput struct {
-	Title          string  `json:"title"`
-	Summary        *string `json:"summary,omitempty"`
-	Description    *string `json:"description,omitempty"`
-	Category       string  `json:"category"`
-	PricingModel   string  `json:"pricingModel"`
-	BasePriceCents int64   `json:"basePriceCents"`
-	Currency       string  `json:"currency"`
-	Status         string  `json:"status"`
+	Title          string         `json:"title"`
+	Summary        *string        `json:"summary,omitempty"`
+	Description    *string        `json:"description,omitempty"`
+	Category       string         `json:"category"`
+	Subcategory    *string        `json:"subcategory,omitempty"`
+	PricingModel   string         `json:"pricingModel"`
+	BasePriceCents int64          `json:"basePriceCents"`
+	Currency       string         `json:"currency"`
+	Status         string         `json:"status"`
+	Attributes     map[string]any `json:"attributes"`
 }
 
 // AvailabilitySlot models weekly availability for a listing.
@@ -77,6 +82,10 @@ func sanitizeListingInput(in ListingInput) ListingInput {
 	if in.Category == "" {
 		in.Category = "general"
 	}
+	if in.Subcategory != nil {
+		trimmed := strings.TrimSpace(strings.ToLower(*in.Subcategory))
+		in.Subcategory = &trimmed
+	}
 	in.PricingModel = strings.TrimSpace(strings.ToLower(in.PricingModel))
 	switch in.PricingModel {
 	case "fixed", "hourly", "quote":
@@ -96,17 +105,28 @@ func sanitizeListingInput(in ListingInput) ListingInput {
 	if in.BasePriceCents < 0 {
 		in.BasePriceCents = 0
 	}
+	if in.Attributes == nil {
+		in.Attributes = map[string]any{}
+	}
 	return in
 }
 
 func (s *Store) CreateListing(ctx context.Context, userUUID string, input ListingInput) (Listing, error) {
 	input = sanitizeListingInput(input)
 	now := time.Now().UTC()
+	category, subcategory, attributes, err := s.validateCategory(ctx, input.Category, input.Subcategory, input.Attributes)
+	if err != nil {
+		return Listing{}, err
+	}
+	attrsJSON, err := json.Marshal(attributes)
+	if err != nil {
+		return Listing{}, err
+	}
 	row := s.db.QueryRowContext(ctx, `
-		INSERT INTO service_listings (user_uuid, title, summary, description, category, pricing_model, base_price_cents, currency, status, created_at, updated_at)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$10)
-		RETURNING id, user_uuid, title, summary, description, category, pricing_model, base_price_cents, currency, status, created_at, updated_at
-	`, userUUID, input.Title, nullable(input.Summary), nullable(input.Description), input.Category, input.PricingModel, input.BasePriceCents, input.Currency, input.Status, now)
+		INSERT INTO service_listings (user_uuid, title, summary, description, category, subcategory, pricing_model, base_price_cents, currency, status, attributes, created_at, updated_at)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$12)
+		RETURNING id, user_uuid, title, summary, description, category, subcategory, pricing_model, base_price_cents, currency, status, attributes, created_at, updated_at
+	`, userUUID, input.Title, nullable(input.Summary), nullable(input.Description), category, nullable(subcategory), input.PricingModel, input.BasePriceCents, input.Currency, input.Status, attrsJSON, now)
 	return scanListing(row)
 }
 
@@ -116,13 +136,21 @@ func (s *Store) UpdateListing(ctx context.Context, userUUID, listingID string, i
 	}
 	input = sanitizeListingInput(input)
 	now := time.Now().UTC()
+	category, subcategory, attributes, err := s.validateCategory(ctx, input.Category, input.Subcategory, input.Attributes)
+	if err != nil {
+		return Listing{}, err
+	}
+	attrsJSON, err := json.Marshal(attributes)
+	if err != nil {
+		return Listing{}, err
+	}
 	row := s.db.QueryRowContext(ctx, `
 		UPDATE service_listings
-		SET title=$1, summary=$2, description=$3, category=$4, pricing_model=$5,
-		    base_price_cents=$6, currency=$7, status=$8, updated_at=$9
-		WHERE id=$10 AND user_uuid=$11
-		RETURNING id, user_uuid, title, summary, description, category, pricing_model, base_price_cents, currency, status, created_at, updated_at
-	`, input.Title, nullable(input.Summary), nullable(input.Description), input.Category, input.PricingModel, input.BasePriceCents, input.Currency, input.Status, now, listingID, userUUID)
+		SET title=$1, summary=$2, description=$3, category=$4, subcategory=$5, pricing_model=$6,
+		    base_price_cents=$7, currency=$8, status=$9, attributes=$10, updated_at=$11
+		WHERE id=$12 AND user_uuid=$13
+		RETURNING id, user_uuid, title, summary, description, category, subcategory, pricing_model, base_price_cents, currency, status, attributes, created_at, updated_at
+	`, input.Title, nullable(input.Summary), nullable(input.Description), category, nullable(subcategory), input.PricingModel, input.BasePriceCents, input.Currency, input.Status, attrsJSON, now, listingID, userUUID)
 	return scanListing(row)
 }
 
@@ -142,7 +170,7 @@ func (s *Store) DeleteListing(ctx context.Context, userUUID, listingID string) e
 
 func (s *Store) ListListingsByUser(ctx context.Context, userUUID string) ([]Listing, error) {
 	rows, err := s.db.QueryxContext(ctx, `
-		SELECT id, user_uuid, title, summary, description, category, pricing_model, base_price_cents, currency, status, created_at, updated_at
+		SELECT id, user_uuid, title, summary, description, category, subcategory, pricing_model, base_price_cents, currency, status, attributes, created_at, updated_at
 		FROM service_listings
 		WHERE user_uuid=$1
 		ORDER BY created_at DESC
@@ -168,7 +196,7 @@ func (s *Store) ListPublicListings(ctx context.Context, limit int) ([]Listing, e
 		limit = 20
 	}
 	rows, err := s.db.QueryxContext(ctx, `
-		SELECT id, user_uuid, title, summary, description, category, pricing_model, base_price_cents, currency, status, created_at, updated_at
+		SELECT id, user_uuid, title, summary, description, category, subcategory, pricing_model, base_price_cents, currency, status, attributes, created_at, updated_at
 		FROM service_listings
 		WHERE status='active'
 		ORDER BY updated_at DESC
@@ -415,18 +443,26 @@ func scanListing(row interface {
 		summary        sql.NullString
 		description    sql.NullString
 		category       string
+		subcategory    sql.NullString
 		pricingModel   string
 		basePriceCents int64
 		currency       string
 		status         string
+		attributesJSON []byte
 		createdAt      time.Time
 		updatedAt      time.Time
 	)
-	if err := row.Scan(&id, &userUUID, &title, &summary, &description, &category, &pricingModel, &basePriceCents, &currency, &status, &createdAt, &updatedAt); err != nil {
+	if err := row.Scan(&id, &userUUID, &title, &summary, &description, &category, &subcategory, &pricingModel, &basePriceCents, &currency, &status, &attributesJSON, &createdAt, &updatedAt); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return Listing{}, ErrListingNotFound
 		}
 		return Listing{}, err
+	}
+	attrs := map[string]any{}
+	if len(attributesJSON) > 0 {
+		if err := json.Unmarshal(attributesJSON, &attrs); err != nil {
+			return Listing{}, err
+		}
 	}
 	return Listing{
 		ID:             id,
@@ -435,10 +471,12 @@ func scanListing(row interface {
 		Summary:        nullableStringPtr(summary),
 		Description:    nullableStringPtr(description),
 		Category:       category,
+		Subcategory:    nullableStringPtr(subcategory),
 		PricingModel:   pricingModel,
 		BasePriceCents: basePriceCents,
 		Currency:       currency,
 		Status:         status,
+		Attributes:     attrs,
 		CreatedAt:      createdAt,
 		UpdatedAt:      updatedAt,
 	}, nil
@@ -453,4 +491,24 @@ func nullableStringPtr(value sql.NullString) *string {
 		return nil
 	}
 	return &trimmed
+}
+
+func (s *Store) validateCategory(ctx context.Context, category string, subcategory *string, attrs map[string]any) (string, *string, map[string]any, error) {
+	if s.cats == nil {
+		return category, subcategory, attrs, nil
+	}
+	selectedSub := ""
+	if subcategory != nil {
+		selectedSub = *subcategory
+	}
+	catDef, subDef, sanitized, err := s.cats.ValidateListingMetadata(ctx, category, selectedSub, attrs)
+	if err != nil {
+		return "", nil, nil, err
+	}
+	var subPtr *string
+	if subDef.Key != "" {
+		key := subDef.Key
+		subPtr = &key
+	}
+	return catDef.Key, subPtr, sanitized, nil
 }
