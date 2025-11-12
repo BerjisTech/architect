@@ -39,6 +39,17 @@ export const appRoutes: Routes = [
     title: 'Plans'
   },
   {
+    path: 'profile',
+    canActivate: [ensureAuthGuard],
+    loadComponent: () => import('./features/profile-edit.page').then(m => m.ProfileEditPage),
+    title: 'My Profile'
+  },
+  {
+    path: 'profiles/:userUuid',
+    loadComponent: () => import('./features/profile-view.page').then(m => m.ProfileViewPage),
+    title: 'Profile'
+  },
+  {
     path: 'studio',
     canActivate: [ensureAuthGuard],
     loadComponent: () => import('./features/design-studio.page').then(m => m.DesignStudioPage),
@@ -49,4 +60,3 @@ export const appRoutes: Routes = [
     redirectTo: ''
   }
 ];
-

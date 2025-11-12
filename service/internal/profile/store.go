@@ -112,6 +112,9 @@ func (s *Store) Get(ctx context.Context, userUUID string) (*Profile, error) {
 	if err != nil {
 		return nil, err
 	}
+	if err := s.populateProfile(ctx, &profile, false); err != nil {
+		return nil, err
+	}
 	return &profile, nil
 }
 
@@ -133,6 +136,9 @@ func (s *Store) GetPublic(ctx context.Context, userUUID string) (*Profile, error
 	}
 	profile, err := row.toProfile()
 	if err != nil {
+		return nil, err
+	}
+	if err := s.populateProfile(ctx, &profile, true); err != nil {
 		return nil, err
 	}
 	return &profile, nil
@@ -269,6 +275,8 @@ func calculateCompletion(p Profile) (int, map[string]bool) {
 		"location":    strings.TrimSpace(deref(p.Location)) != "",
 		"contact":     strings.TrimSpace(deref(p.Phone)) != "" || strings.TrimSpace(deref(p.Website)) != "",
 		"company":     strings.TrimSpace(deref(p.CompanyName)) != "",
+		"portfolio":   len(p.Portfolio) > 0,
+		"certifications": len(p.Certifications) > 0,
 	}
 
 	completed := 0

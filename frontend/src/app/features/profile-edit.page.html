@@ -1,0 +1,218 @@
+<div class="profile-edit" *ngIf="!loading; else loadingTpl">
+  <h1 class="page-title">My Profile</h1>
+
+  <div class="flash" *ngIf="lastSuccess">{{ lastSuccess }}</div>
+  <div class="flash flash--error" *ngIf="lastError">{{ lastError }}</div>
+
+  <section class="card">
+    <h2>Profile Details</h2>
+    <form [formGroup]="profileForm" (ngSubmit)="saveProfile()">
+      <div class="grid">
+        <label>
+          Profile Type
+          <select formControlName="profileType">
+            <option value="" disabled>Select type</option>
+            <option *ngFor="let type of profileTypes" [value]="type.type">{{ type.label }}</option>
+          </select>
+        </label>
+        <label>
+          Display Name
+          <input type="text" formControlName="displayName" />
+        </label>
+        <label>
+          Headline
+          <input type="text" formControlName="headline" />
+        </label>
+        <label>
+          Company
+          <input type="text" formControlName="companyName" />
+        </label>
+        <label>
+          Phone
+          <input type="text" formControlName="phone" />
+        </label>
+        <label>
+          Website
+          <input type="url" formControlName="website" />
+        </label>
+        <label>
+          Location
+          <input type="text" formControlName="location" />
+        </label>
+        <label>
+          Avatar URL
+          <input type="url" formControlName="avatarUrl" />
+        </label>
+        <label class="span-2">
+          Bio
+          <textarea rows="4" formControlName="bio"></textarea>
+        </label>
+        <label class="span-2">
+          Specialties <small>(comma separated)</small>
+          <input type="text" formControlName="specialties" />
+        </label>
+        <label>
+          <input type="checkbox" formControlName="isPublic" />
+          Public profile
+        </label>
+      </div>
+      <button type="submit" [disabled]="profileForm.invalid || saving">Save Profile</button>
+    </form>
+    <dl class="meta" *ngIf="profile">
+      <div><dt>Completion</dt><dd>{{ profile.completionScore }}%</dd></div>
+      <div><dt>Verification</dt><dd class="status-badge">{{ profile.verificationStatus | titlecase }}</dd></div>
+      <div><dt>Reviews</dt><dd>{{ profile.reviewSummary?.average | number : '1.1-1' }} ★ ({{ profile.reviewSummary?.count }})</dd></div>
+    </dl>
+    <ul class="completion">
+      <li *ngFor="let section of completionEntries()">
+        <span class="indicator" [class.complete]="section.value"></span>
+        {{ section.key | titlecase }}
+      </li>
+    </ul>
+  </section>
+
+  <section class="card" *ngIf="isPrivileged()">
+    <h2>Verification Controls</h2>
+    <div class="verification-control">
+      <label>
+        Status
+        <select [value]="verificationStatus" (change)="updateVerification($event.target.value)">
+          <option value="pending">Pending</option>
+          <option value="approved">Approved</option>
+          <option value="rejected">Rejected</option>
+        </select>
+      </label>
+      <label>
+        Notes
+        <textarea rows="3" [(ngModel)]="verificationNotes"></textarea>
+      </label>
+      <button type="button" (click)="updateVerification(verificationStatus)">Update Verification</button>
+    </div>
+  </section>
+
+  <section class="card">
+    <div class="section-header">
+      <h2>Portfolio</h2>
+      <button type="button" (click)="startCreatePortfolio()">Add New</button>
+    </div>
+    <form [formGroup]="portfolioForm" (ngSubmit)="submitPortfolio()" class="subform">
+      <div class="grid">
+        <label>
+          Title
+          <input type="text" formControlName="title" required />
+        </label>
+        <label>
+          Media URL
+          <input type="url" formControlName="mediaUrl" />
+        </label>
+        <label>
+          Position
+          <input type="number" formControlName="position" />
+        </label>
+        <label>
+          Tags <small>(comma separated)</small>
+          <input type="text" formControlName="tags" />
+        </label>
+        <label class="span-2">
+          Description
+          <textarea rows="3" formControlName="description"></textarea>
+        </label>
+        <label>
+          <input type="checkbox" formControlName="isPublic" />
+          Public
+        </label>
+      </div>
+      <div class="actions">
+        <button type="submit" [disabled]="portfolioForm.invalid || saving">
+          {{ (portfolioForm.value.id ? 'Update' : 'Create') + ' Item' }}
+        </button>
+      </div>
+    </form>
+    <ul class="item-list">
+      <li *ngFor="let item of portfolio">
+        <h3>{{ item.title }}</h3>
+        <p *ngIf="item.description">{{ item.description }}</p>
+        <p class="meta">
+          <span *ngIf="item.mediaUrl">
+            <a [href]="item.mediaUrl" target="_blank" rel="noopener">Media</a>
+          </span>
+          <span>Visibility: {{ item.isPublic ? 'Public' : 'Private' }}</span>
+          <span>Position: {{ item.position }}</span>
+        </p>
+        <p class="tags" *ngIf="item.tags?.length">
+          <span *ngFor="let tag of item.tags">#{{ tag }}</span>
+        </p>
+        <div class="actions">
+          <button type="button" (click)="editPortfolio(item)">Edit</button>
+          <button type="button" class="danger" (click)="removePortfolio(item)">Delete</button>
+        </div>
+      </li>
+    </ul>
+  </section>
+
+  <section class="card">
+    <div class="section-header">
+      <h2>Certifications</h2>
+      <button type="button" (click)="startCreateCertification()">Add New</button>
+    </div>
+    <form [formGroup]="certificationForm" (ngSubmit)="submitCertification()" class="subform">
+      <div class="grid">
+        <label>
+          Name
+          <input type="text" formControlName="name" required />
+        </label>
+        <label>
+          Issuer
+          <input type="text" formControlName="issuer" />
+        </label>
+        <label>
+          Issued On
+          <input type="date" formControlName="issuedOn" />
+        </label>
+        <label>
+          Expires On
+          <input type="date" formControlName="expiresOn" />
+        </label>
+        <label>
+          Credential ID
+          <input type="text" formControlName="credentialId" />
+        </label>
+        <label>
+          Credential URL
+          <input type="url" formControlName="credentialUrl" />
+        </label>
+      </div>
+      <div class="actions">
+        <button type="submit" [disabled]="certificationForm.invalid || saving">
+          {{ (certificationForm.value.id ? 'Update' : 'Create') + ' Certification' }}
+        </button>
+      </div>
+    </form>
+    <ul class="item-list">
+      <li *ngFor="let cert of certifications">
+        <h3>{{ cert.name }}</h3>
+        <p class="meta">
+          <span *ngIf="cert.issuer">Issuer: {{ cert.issuer }}</span>
+          <span *ngIf="cert.issuedOn">Issued: {{ cert.issuedOn | date }}</span>
+          <span *ngIf="cert.expiresOn">Expires: {{ cert.expiresOn | date }}</span>
+          <span>Status: {{ cert.status | titlecase }}</span>
+        </p>
+        <p class="meta" *ngIf="cert.credentialUrl">
+          <a [href]="cert.credentialUrl" target="_blank" rel="noopener">Credential Link</a>
+        </p>
+        <div class="actions">
+          <button type="button" (click)="editCertification(cert)">Edit</button>
+          <button type="button" class="danger" (click)="removeCertification(cert)">Delete</button>
+          <ng-container *ngIf="isPrivileged()">
+            <button type="button" (click)="updateCertificationStatus(cert, 'approved')">Approve</button>
+            <button type="button" (click)="updateCertificationStatus(cert, 'rejected')">Reject</button>
+          </ng-container>
+        </div>
+      </li>
+    </ul>
+  </section>
+</div>
+
+<ng-template #loadingTpl>
+  <p>Loading profile…</p>
+</ng-template>

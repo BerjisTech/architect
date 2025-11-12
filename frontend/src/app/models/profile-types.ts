@@ -82,8 +82,8 @@ export const ARCHITECT_PROVIDER_PROFILES: ProviderProfileDefinition[] = [
   }
 ];
 
-export const ARCHITECT_PROVIDER_TYPES: readonly ArchitectProfileType[] =
-  ARCHITECT_PROVIDER_PROFILES.map((profile) => profile.type) as const;
+export const ARCHITECT_PROVIDER_TYPES: ArchitectProfileType[] =
+  ARCHITECT_PROVIDER_PROFILES.map((profile) => profile.type);
 
 export const ARCHITECT_PROVIDER_ROLE_BY_TYPE = new Map<ArchitectProfileType, string>(
   ARCHITECT_PROVIDER_PROFILES.map((profile) => [profile.type, profile.role])

@@ -33,12 +33,16 @@ CREATE TABLE IF NOT EXISTS profile_portfolio_items (
     description TEXT NULL,
     media_url TEXT NULL,
     tags TEXT[] NOT NULL DEFAULT '{}',
+    is_public BOOLEAN NOT NULL DEFAULT TRUE,
+    position INTEGER NOT NULL DEFAULT 0,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     FOREIGN KEY (user_uuid) REFERENCES profiles(user_uuid) ON DELETE CASCADE
 );
 
 CREATE INDEX IF NOT EXISTS idx_portfolio_user ON profile_portfolio_items (user_uuid);
+CREATE INDEX IF NOT EXISTS idx_portfolio_public ON profile_portfolio_items (user_uuid, is_public);
+CREATE INDEX IF NOT EXISTS idx_portfolio_position ON profile_portfolio_items (user_uuid, position);
 
 CREATE TABLE IF NOT EXISTS profile_certifications (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -75,3 +79,4 @@ CREATE TABLE IF NOT EXISTS profile_reviews (
 
 CREATE UNIQUE INDEX IF NOT EXISTS idx_profile_reviews_unique ON profile_reviews (user_uuid, reviewer_uuid);
 CREATE INDEX IF NOT EXISTS idx_profile_reviews_user ON profile_reviews (user_uuid);
+CREATE INDEX IF NOT EXISTS idx_profile_reviews_reviewer ON profile_reviews (reviewer_uuid);

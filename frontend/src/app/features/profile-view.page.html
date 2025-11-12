@@ -1,0 +1,109 @@
+<div class="profile-view" *ngIf="!loading; else loadingTpl">
+  <h1 class="page-title" *ngIf="profile">{{ profile.displayName || profile.headline || ('Profile ' + profile.userUuid) }}</h1>
+
+  <div class="flash flash--error" *ngIf="lastError">{{ lastError }}</div>
+
+  <section class="card" *ngIf="profile">
+    <div class="profile-header">
+      <div>
+        <p class="headline" *ngIf="profile.headline">{{ profile.headline }}</p>
+        <p class="meta">
+          <span>{{ profile.profileType | titlecase }}</span>
+          <span *ngIf="profile.companyName">· {{ profile.companyName }}</span>
+          <span *ngIf="profile.location">· {{ profile.location }}</span>
+        </p>
+        <p class="meta">
+          <span>Verification: {{ profile.verificationStatus | titlecase }}</span>
+        </p>
+        <p class="bio" *ngIf="profile.bio">{{ profile.bio }}</p>
+        <ul class="tags" *ngIf="profile.specialties?.length">
+          <li *ngFor="let tag of profile.specialties">#{{ tag }}</li>
+        </ul>
+      </div>
+      <div class="metrics">
+        <p><strong>{{ profile.reviewSummary?.average | number : '1.1-1' }}★</strong></p>
+        <p>{{ profile.reviewSummary?.count }} reviews</p>
+        <p>{{ profile.completionScore }}% complete</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="card" *ngIf="portfolio.length">
+    <h2>Portfolio</h2>
+    <ul class="item-list">
+      <li *ngFor="let item of portfolio; trackBy: trackById">
+        <h3>{{ item.title }}</h3>
+        <p *ngIf="item.description">{{ item.description }}</p>
+        <p class="meta">
+          <span *ngIf="item.mediaUrl"><a [href]="item.mediaUrl" target="_blank" rel="noopener">View Media</a></span>
+          <span>Added {{ item.createdAt | date }}</span>
+        </p>
+        <p class="tags" *ngIf="item.tags?.length">
+          <span *ngFor="let tag of item.tags">#{{ tag }}</span>
+        </p>
+      </li>
+    </ul>
+  </section>
+
+  <section class="card" *ngIf="certifications.length">
+    <h2>Certifications & Licenses</h2>
+    <ul class="item-list">
+      <li *ngFor="let cert of certifications; trackBy: trackById">
+        <h3>{{ cert.name }}</h3>
+        <p class="meta">
+          <span *ngIf="cert.issuer">Issuer: {{ cert.issuer }}</span>
+          <span *ngIf="cert.issuedOn">Issued: {{ cert.issuedOn | date }}</span>
+          <span *ngIf="cert.expiresOn">Expires: {{ cert.expiresOn | date }}</span>
+        </p>
+        <p class="meta" *ngIf="cert.credentialUrl">
+          <a [href]="cert.credentialUrl" target="_blank" rel="noopener">View Credential</a>
+        </p>
+      </li>
+    </ul>
+  </section>
+
+  <section class="card">
+    <div class="section-header">
+      <h2>Reviews</h2>
+    </div>
+    <form *ngIf="canReview()" [formGroup]="reviewForm" (ngSubmit)="submitReview()" class="review-form">
+      <label>
+        Rating
+        <input type="number" min="1" max="5" formControlName="rating" />
+      </label>
+      <label>
+        Title
+        <input type="text" formControlName="title" />
+      </label>
+      <label>
+        Comment
+        <textarea rows="3" formControlName="comment"></textarea>
+      </label>
+      <label>
+        <input type="checkbox" formControlName="isPublic" />
+        Public
+      </label>
+      <button type="submit" [disabled]="reviewForm.invalid">Submit Review</button>
+    </form>
+
+    <ul class="item-list">
+      <li *ngFor="let review of reviews; trackBy: trackById">
+        <h3>{{ review.rating }}★ <small *ngIf="review.title">· {{ review.title }}</small></h3>
+        <p *ngIf="review.comment">{{ review.comment }}</p>
+        <p class="meta">
+          <span>By {{ review.reviewerUuid }}</span>
+          <span>on {{ review.createdAt | date:'mediumDate' }}</span>
+          <span>{{ review.isPublic ? 'Public' : 'Private' }}</span>
+        </p>
+        <div class="actions" *ngIf="canDeleteReview(review)">
+          <button type="button" class="danger" (click)="deleteReview(review)">Delete</button>
+        </div>
+      </li>
+      <li *ngIf="!reviews.length" class="empty">No reviews yet.</li>
+    </ul>
+  </section>
+</div>
+
+<ng-template #loadingTpl>
+  <p>Loading profile…</p>
+</ng-template>

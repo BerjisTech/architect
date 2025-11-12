@@ -65,6 +65,7 @@ func New(opts Options) *fiber.App {
 		Verifier:    authVerifier,
 	})
 
+	public := app.Group("/v1")
 	protected := app.Group("/v1", requireAuth)
 	db := opts.DB
 	readDBFn := opts.ReadDB
@@ -77,7 +78,7 @@ func New(opts Options) *fiber.App {
 
 	if db != nil {
 		profileStore := profile.NewStore(db)
-		registerProfileRoutes(protected, profileStore)
+		registerProfileRoutes(public, protected, profileStore, db)
 	}
 
 	// Floorplans CRUD

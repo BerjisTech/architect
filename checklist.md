@@ -107,11 +107,11 @@ Build a comprehensive real estate and construction platform at architect.berjis.
 - [x] Design user profile data structure
 - [x] Create profile management API endpoints (CRUD)
 - [x] Implement profile completion tracking
-- [ ] Create profile view pages for each user type
-- [ ] Implement profile verification system
-- [ ] Add profile rating and review system
-- [ ] Create portfolio/gallery section for service providers
-- [ ] Implement certification/license upload and verification
+- [x] Create profile view pages for each user type
+- [x] Implement profile verification system
+- [x] Add profile rating and review system
+- [x] Create portfolio/gallery section for service providers
+- [x] Implement certification/license upload and verification
 
 ### 3.3 Service Provider Features
 - [ ] Create service provider onboarding flow
