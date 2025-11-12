@@ -147,11 +147,11 @@ Build a comprehensive real estate and construction platform at architect.berjis.
   - [x] By rating/reviews
   - [x] By availability
   - By certifications
-- [ ] Implement geolocation-based search
-- [ ] Create search results ranking algorithm
-- [ ] Add save/favorite functionality
-- [ ] Implement search history and suggestions
-- [ ] Create "recommended for you" section
+- [x] Implement geolocation-based search
+- [x] Create search results ranking algorithm
+- [x] Add save/favorite functionality
+- [x] Implement search history and suggestions
+- [x] Create "recommended for you" section
 
 ### 4.3 Service Listings
 - [ ] Design service listing data model
