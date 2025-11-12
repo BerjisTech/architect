@@ -13,14 +13,18 @@ import (
 	"github.com/jmoiron/sqlx"
 
 	"github.com/berjistech/berjis-ecosystem/architect/service/internal/auth"
+	"github.com/berjistech/berjis-ecosystem/architect/service/internal/coreapi"
+	"github.com/berjistech/berjis-ecosystem/architect/service/internal/profile"
 	coreauth "github.com/berjistech/berjis-ecosystem/shared/coreauth"
 )
 
 type Options struct {
 	AllowedOrigins string
 	DB             *sqlx.DB
+	ReadDB         func() *sqlx.DB
 	Env            string
 	CoreAPIBase    string
+	CoreAPIClient  *coreapi.Client
 	Logger         *slog.Logger
 }
 
@@ -63,8 +67,17 @@ func New(opts Options) *fiber.App {
 
 	protected := app.Group("/v1", requireAuth)
 	db := opts.DB
+	readDBFn := opts.ReadDB
+	if readDBFn == nil {
+		readDBFn = func() *sqlx.DB { return db }
+	}
 	if db == nil {
 		logger.Warn("database connection not provided; floorplan routes will return 503")
+	}
+
+	if db != nil {
+		profileStore := profile.NewStore(db)
+		registerProfileRoutes(protected, profileStore)
 	}
 
 	// Floorplans CRUD
@@ -128,13 +141,14 @@ func New(opts Options) *fiber.App {
 	})
 
 	protected.Get("/floorplans/:id", func(c *fiber.Ctx) error {
-		if db == nil {
+		reader := readDBFn()
+		if reader == nil {
 			logger.Error("floorplan fetch attempted while database unavailable", "id", c.Params("id"))
 			return c.Status(fiber.StatusServiceUnavailable).JSON(fiber.Map{"success": false, "message": "storage unavailable"})
 		}
 		id := c.Params("id")
 		var row floorplan
-		err := db.Get(&row, `SELECT id,name,owner_user_id,data,updated_at FROM floorplans WHERE id=$1`, id)
+		err := reader.Get(&row, `SELECT id,name,owner_user_id,data,updated_at FROM floorplans WHERE id=$1`, id)
 		if err != nil {
 			if err == sql.ErrNoRows {
 				return c.Status(404).JSON(fiber.Map{"success": false})
@@ -146,7 +160,8 @@ func New(opts Options) *fiber.App {
 	})
 
 	protected.Get("/floorplans", func(c *fiber.Ctx) error {
-		if db == nil {
+		reader := readDBFn()
+		if reader == nil {
 			logger.Error("floorplan list attempted while database unavailable")
 			return c.Status(fiber.StatusServiceUnavailable).JSON(fiber.Map{"success": false, "message": "storage unavailable"})
 		}
@@ -155,9 +170,9 @@ func New(opts Options) *fiber.App {
 		var rows []floorplan
 		var err error
 		if owner != "" {
-			err = db.Select(&rows, `SELECT id,name,owner_user_id,data,updated_at FROM floorplans WHERE owner_user_id=$1 ORDER BY updated_at DESC LIMIT $2`, owner, limit)
+			err = reader.Select(&rows, `SELECT id,name,owner_user_id,data,updated_at FROM floorplans WHERE owner_user_id=$1 ORDER BY updated_at DESC LIMIT $2`, owner, limit)
 		} else {
-			err = db.Select(&rows, `SELECT id,name,owner_user_id,data,updated_at FROM floorplans ORDER BY updated_at DESC LIMIT $1`, limit)
+			err = reader.Select(&rows, `SELECT id,name,owner_user_id,data,updated_at FROM floorplans ORDER BY updated_at DESC LIMIT $1`, limit)
 		}
 		if err != nil {
 			logger.Error("failed to list floorplans", "error", err)
