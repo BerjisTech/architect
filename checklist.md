@@ -255,10 +255,10 @@ Build a comprehensive real estate and construction platform at architect.berjis.
   - [x] Selection highlight (different color/thickness)
   - [x] Selection bounding box
   - [x] Display wall properties on selection
-- [ ] Create wall editing tools:
+- [x] Create wall editing tools:
   - [x] Drag endpoints to resize wall
   - [x] Drag wall body to move entire wall
-  - Snap to other walls while dragging
+  - [x] Snap to other walls while dragging
   - [x] Maintain intersections when moving walls
   - [x] Show dimension guides while moving
 - [ ] Implement wall deletion:
@@ -293,15 +293,15 @@ Build a comprehensive real estate and construction platform at architect.berjis.
   - Display orientation in tools popup
   - Show compass bearing (N, NE, E, SE, S, SW, W, NW)
 - [ ] Implement wall thickness controls:
-  - Dropdown for standard thicknesses (e.g., 4", 6", 8", 10", 12")
-  - Custom thickness input
-  - Preview thickness change before applying
-  - Option to maintain interior/exterior edge when changing thickness
+  - [ ] Dropdown for standard thicknesses (e.g., 4", 6", 8", 10", 12")
+  - [x] Custom thickness input
+  - [ ] Preview thickness change before applying
+  - [ ] Option to maintain interior/exterior edge when changing thickness
 - [ ] Create wall height controls (for 3D):
-  - Standard heights dropdown (8ft, 9ft, 10ft, etc.)
-  - Custom height input
-  - Different heights for different walls
-  - Automatic 3D view update
+  - [ ] Standard heights dropdown (8ft, 9ft, 10ft, etc.)
+  - [x] Custom height input
+  - [ ] Different heights for different walls
+  - [x] Automatic 3D view update
 - [ ] Add wall style/type selector:
   - Exterior wall
   - Interior wall

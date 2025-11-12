@@ -112,6 +112,7 @@ export class DesignStudioPage implements OnInit, OnDestroy {
         kind: 'wall-body';
         walls: { wall: Wall; originalA: Point; originalB: Point }[];
         start: Point;
+        delta: Point;
       }
     | {
         kind: 'room-corner';
@@ -601,7 +602,8 @@ export class DesignStudioPage implements OnInit, OnDestroy {
         this.dragging = {
           kind: 'wall-body',
           walls: dragWalls,
-          start: { ...p }
+          start: { ...p },
+          delta: { x: 0, y: 0 }
         };
         this.draggingMoved = false;
         this.updateDragMeasurements();
@@ -661,16 +663,21 @@ export class DesignStudioPage implements OnInit, OnDestroy {
         this.updateDragMeasurements();
       } else if (this.dragging.kind === 'wall-body') {
         const drag = this.dragging;
-        const dx = p.x - drag.start.x;
-        const dy = p.y - drag.start.y;
+        const delta = this.computeBodyDragDelta(drag, p);
+        drag.delta = { x: delta.dx, y: delta.dy };
         drag.walls.forEach(entry => {
-          entry.wall.a = { x: entry.originalA.x + dx, y: entry.originalA.y + dy };
-          entry.wall.b = { x: entry.originalB.x + dx, y: entry.originalB.y + dy };
+          entry.wall.a = { x: entry.originalA.x + delta.dx, y: entry.originalA.y + delta.dy };
+          entry.wall.b = { x: entry.originalB.x + delta.dx, y: entry.originalB.y + delta.dy };
         });
-        this.draggingMoved = true;
-        this.skipNextClick = true;
+        const moved = Math.abs(delta.dx) > 0.01 || Math.abs(delta.dy) > 0.01;
+        this.draggingMoved = moved;
+        if (moved) {
+          this.skipNextClick = true;
+        }
         this.updateSelectedWallPoint();
         this.updateDragMeasurements();
+        this.pendingIntersection = null;
+        this.guideOverlay = null;
         this.invalidate3dCache();
         if (this.viewPort === '3d') {
           this.scheduleFrame();
@@ -748,9 +755,7 @@ export class DesignStudioPage implements OnInit, OnDestroy {
     this.draggingMoved = false;
     this.draggingMeasurements = [];
     this.draggingDeltaLabel = null;
-    if (moved) {
-      this.skipNextClick = true;
-    }
+    this.skipNextClick = moved;
     if (!drag) {
       return;
     }
@@ -1637,6 +1642,70 @@ export class DesignStudioPage implements OnInit, OnDestroy {
     return overlays;
   }
 
+  private computeBodyDragDelta(
+    drag: { start: Point; walls: { wall: Wall; originalA: Point; originalB: Point }[] },
+    target: Point
+  ): { dx: number; dy: number } {
+    const rawDx = target.x - drag.start.x;
+    const rawDy = target.y - drag.start.y;
+    let dx = rawDx;
+    let dy = rawDy;
+    if (!this.snap) {
+      return { dx, dy };
+    }
+    const start = drag.start;
+    const gridTarget = this.snapPoint({ x: start.x + rawDx, y: start.y + rawDy });
+    const gridTolerance = Math.max(this.gridSpacing * 0.4, 8);
+    if (Math.abs(gridTarget.x - (start.x + rawDx)) <= gridTolerance) {
+      dx = gridTarget.x - start.x;
+    }
+    if (Math.abs(gridTarget.y - (start.y + rawDy)) <= gridTolerance) {
+      dy = gridTarget.y - start.y;
+    }
+    const snapTolerance = Math.max(10, this.gridSpacing * 0.25);
+    const movingIds = new Set(drag.walls.map(entry => entry.wall.id));
+    const movingPoints = drag.walls.flatMap(entry => [entry.originalA, entry.originalB]);
+    const candidateNodes: Point[] = [];
+    for (const node of this.wallNodeIndex()) {
+      if (node.anchors.every(anchor => movingIds.has(anchor.wall.id))) {
+        continue;
+      }
+      if (!node.anchors.some(anchor => !movingIds.has(anchor.wall.id))) {
+        continue;
+      }
+      candidateNodes.push({ x: node.point.x, y: node.point.y });
+    }
+    let bestDxAdjust = 0;
+    let bestDyAdjust = 0;
+    let bestDxAbs = snapTolerance;
+    let bestDyAbs = snapTolerance;
+    movingPoints.forEach(orig => {
+      const movedX = orig.x + dx;
+      const movedY = orig.y + dy;
+      candidateNodes.forEach(targetNode => {
+        const diffX = targetNode.x - movedX;
+        const absDiffX = Math.abs(diffX);
+        if (absDiffX < bestDxAbs) {
+          bestDxAbs = absDiffX;
+          bestDxAdjust = diffX;
+        }
+        const diffY = targetNode.y - movedY;
+        const absDiffY = Math.abs(diffY);
+        if (absDiffY < bestDyAbs) {
+          bestDyAbs = absDiffY;
+          bestDyAdjust = diffY;
+        }
+      });
+    });
+    if (bestDxAbs < snapTolerance) {
+      dx += bestDxAdjust;
+    }
+    if (bestDyAbs < snapTolerance) {
+      dy += bestDyAdjust;
+    }
+    return { dx, dy };
+  }
+
   private updateDragMeasurements(): void {
     const drag = this.dragging;
     if (!drag) {
@@ -1687,18 +1756,15 @@ export class DesignStudioPage implements OnInit, OnDestroy {
         length: this.segLen(entry.wall.a, entry.wall.b)
       }));
       this.draggingMeasurements = segments;
-      if (drag.walls.length) {
-        const dx = drag.walls[0].wall.a.x - drag.walls[0].originalA.x;
-        const dy = drag.walls[0].wall.a.y - drag.walls[0].originalA.y;
-        if (Math.abs(dx) > 0.5 || Math.abs(dy) > 0.5) {
-          const text = `${this.formatSignedLength(dx)} ΔX · ${this.formatSignedLength(dy)} ΔY`;
-          this.draggingDeltaLabel = {
-            position: { x: drag.start.x + dx + 40, y: drag.start.y + dy - 40 },
-            text
-          };
-        } else {
-          this.draggingDeltaLabel = null;
-        }
+      const delta = drag.delta ?? { x: 0, y: 0 };
+      const dx = delta.x;
+      const dy = delta.y;
+      if (Math.abs(dx) > 0.5 || Math.abs(dy) > 0.5) {
+        const text = `${this.formatSignedLength(dx)} ΔX · ${this.formatSignedLength(dy)} ΔY`;
+        this.draggingDeltaLabel = {
+          position: { x: drag.start.x + dx + 40, y: drag.start.y + dy - 40 },
+          text
+        };
       } else {
         this.draggingDeltaLabel = null;
       }
@@ -1799,6 +1865,82 @@ export class DesignStudioPage implements OnInit, OnDestroy {
   }
   get totalSelectedWallLength(): number {
     return this.calculateSelectedWallLength();
+  }
+  get selectedWallsThicknessValue(): number | null {
+    const walls = this.selectedWalls;
+    if (!walls.length) {
+      return null;
+    }
+    const first = walls[0].thickness;
+    const uniform = walls.every(w => Math.abs(w.thickness - first) < 0.5);
+    return uniform ? first : null;
+  }
+  get selectedWallsHeightValue(): number | null {
+    const walls = this.selectedWalls;
+    if (!walls.length) {
+      return null;
+    }
+    const first = walls[0].height;
+    const uniform = walls.every(w => Math.abs(w.height - first) < 0.5);
+    return uniform ? first : null;
+  }
+  onSelectedWallsThicknessInput(value: string): void {
+    if (!this.selectedWalls.length) {
+      return;
+    }
+    const parsed = Number(value);
+    if (!Number.isFinite(parsed)) {
+      return;
+    }
+    const thickness = Math.max(40, Math.round(parsed));
+    this.applySelectedWallsThickness(thickness);
+  }
+  onSelectedWallsHeightInput(value: string): void {
+    if (!this.selectedWalls.length) {
+      return;
+    }
+    const parsed = Number(value);
+    if (!Number.isFinite(parsed)) {
+      return;
+    }
+    const height = Math.max(1000, Math.round(parsed));
+    this.applySelectedWallsHeight(height);
+  }
+  private applySelectedWallsThickness(thickness: number): void {
+    const walls = this.selectedWalls;
+    if (!walls.length) {
+      return;
+    }
+    walls.forEach(wall => {
+      wall.thickness = thickness;
+    });
+    this.wallThickness = thickness;
+    this.rebuildMeshes();
+    this.invalidate3dCache();
+    if (this.viewPort === '3d') {
+      this.scheduleFrame();
+    }
+    this.updateSelectedWallPoint();
+    const label = this.selectedWallIds.length > 1 ? `${this.selectedWallIds.length} walls` : 'Wall';
+    this.setSaveState('idle', `${label} thickness set to ${thickness} mm.`);
+  }
+  private applySelectedWallsHeight(height: number): void {
+    const walls = this.selectedWalls;
+    if (!walls.length) {
+      return;
+    }
+    walls.forEach(wall => {
+      wall.height = height;
+    });
+    this.wallHeight = height;
+    this.rebuildMeshes();
+    this.invalidate3dCache();
+    if (this.viewPort === '3d') {
+      this.scheduleFrame();
+    }
+    this.updateSelectedWallPoint();
+    const label = this.selectedWallIds.length > 1 ? `${this.selectedWallIds.length} walls` : 'Wall';
+    this.setSaveState('idle', `${label} height set to ${height} mm.`);
   }
   private syncPrimarySelection(preferredId?: string | null): void {
     if (preferredId && this.selectedWallIds.includes(preferredId)) {

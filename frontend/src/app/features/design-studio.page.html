@@ -397,6 +397,22 @@
                 <input type="number" class="w-20 rounded border border-slate-200 px-2 py-1 dark:border-slate-700 dark:bg-slate-800"
                        [ngModel]="lengthDelta" (ngModelChange)="lengthDelta = Math.max(10, +$event || 10)" min="10" step="10" />
               </label>
+              <label class="flex items-center justify-between gap-2">
+                <span>Thickness (mm)</span>
+                <input type="number" class="w-20 rounded border border-slate-200 px-2 py-1 dark:border-slate-700 dark:bg-slate-800"
+                       [value]="selectedWallsThicknessValue ?? ''"
+                       [placeholder]="selectedWallsThicknessValue === null && selectedWalls.length ? 'Mixed' : ''"
+                       (input)="onSelectedWallsThicknessInput($any($event.target).value)"
+                       min="40" step="10" />
+              </label>
+              <label class="flex items-center justify-between gap-2">
+                <span>Height (mm)</span>
+                <input type="number" class="w-20 rounded border border-slate-200 px-2 py-1 dark:border-slate-700 dark:bg-slate-800"
+                       [value]="selectedWallsHeightValue ?? ''"
+                       [placeholder]="selectedWallsHeightValue === null && selectedWalls.length ? 'Mixed' : ''"
+                       (input)="onSelectedWallsHeightInput($any($event.target).value)"
+                       min="1000" step="50" />
+              </label>
               <div class="grid grid-cols-2 gap-2">
                 <button type="button" class="btn-ghost px-2 py-1 text-left" [disabled]="selectedWallIds.length !== 1" (click)="branchFromSelectedWall()">Branch from here</button>
                 <button type="button" class="btn-ghost px-2 py-1 text-left" [disabled]="selectedWallIds.length !== 1" (click)="splitSelectedWall()">Split at point</button>
