@@ -2,18 +2,19 @@ import { CommonModule } from '@angular/common';
 import { Component, OnInit, inject } from '@angular/core';
 import { FormBuilder, FormGroup, ReactiveFormsModule } from '@angular/forms';
 import { firstValueFrom } from 'rxjs';
+import { RouterModule } from '@angular/router';
 
 import {
   ProviderApiService,
   ProviderSearchFilters
 } from '../core/services/provider-api.service';
 import { ServiceCategory, ServiceSubcategory } from '../models/categories';
-import { ProviderSearchResult } from '../models/providers';
+import { ProviderSearchResult, SearchHistoryItem } from '../models/providers';
 
 @Component({
   selector: 'arch-matching',
   standalone: true,
-  imports: [CommonModule, ReactiveFormsModule],
+  imports: [CommonModule, ReactiveFormsModule, RouterModule],
   templateUrl: './matching.page.html'
 })
 export class MatchingPage implements OnInit {
@@ -26,6 +27,9 @@ export class MatchingPage implements OnInit {
     subcategory: [''],
     region: [''],
     country: [''],
+    latitude: [null],
+    longitude: [null],
+    radiusKm: [null],
     minPrice: [null],
     maxPrice: [null],
     minRating: [null],
@@ -39,8 +43,13 @@ export class MatchingPage implements OnInit {
 
   results: ProviderSearchResult[] = [];
   resultMeta = { limit: 20, offset: 0, count: 0 };
+  recommended: ProviderSearchResult[] = [];
+  history: SearchHistoryItem[] = [];
+  favorites = new Set<string>();
+  favoriteProcessing = new Set<string>();
 
   loading = false;
+  locationLoading = false;
   initialized = false;
   error: string | null = null;
 
@@ -50,6 +59,7 @@ export class MatchingPage implements OnInit {
       this.onCategoryChanged(typeof value === 'string' ? value : '');
     });
     await this.search();
+    await Promise.all([this.loadSearchHistory(), this.loadRecommendations()]);
     this.initialized = true;
   }
 
@@ -66,6 +76,8 @@ export class MatchingPage implements OnInit {
         offset: meta.offset ?? 0,
         count: meta.count ?? this.results.length
       };
+      this.refreshFavoritesSet();
+      void this.loadRecommendations();
     } catch (error) {
       console.error('Failed to search providers', error);
       this.error = 'Unable to search providers right now.';
@@ -83,6 +95,9 @@ export class MatchingPage implements OnInit {
       subcategory: '',
       region: '',
       country: '',
+      latitude: null,
+      longitude: null,
+      radiusKm: null,
       minPrice: null,
       maxPrice: null,
       minRating: null,
@@ -90,7 +105,84 @@ export class MatchingPage implements OnInit {
       startMinute: null,
       endMinute: null
     });
+    this.resultMeta.offset = 0;
     await this.search();
+  }
+
+  async useMyLocation(): Promise<void> {
+    if (!('geolocation' in navigator)) {
+      return;
+    }
+    this.locationLoading = true;
+    navigator.geolocation.getCurrentPosition(
+      position => {
+        const { latitude, longitude } = position.coords;
+        this.filtersForm.patchValue({
+          latitude,
+          longitude,
+          radiusKm: this.filtersForm.value.radiusKm ?? 50
+        });
+        this.locationLoading = false;
+      },
+      error => {
+        console.warn('Geolocation error', error);
+        this.locationLoading = false;
+      },
+      { enableHighAccuracy: true, timeout: 10000 }
+    );
+  }
+
+  applyHistory(item: SearchHistoryItem): void {
+    const filters = item.filters ?? {};
+    const categories = (filters['categories'] as string[] | undefined) ?? [];
+    const subcategories = (filters['subcategories'] as string[] | undefined) ?? [];
+    const countries = (filters['countries'] as string[] | undefined) ?? [];
+    const latitude = typeof filters['latitude'] === 'number' ? (filters['latitude'] as number) : null;
+    const longitude = typeof filters['longitude'] === 'number' ? (filters['longitude'] as number) : null;
+    const radius = typeof filters['radiusKm'] === 'number' ? (filters['radiusKm'] as number) : null;
+    const minPriceCents = typeof filters['minPriceCents'] === 'number' ? (filters['minPriceCents'] as number) : null;
+    const maxPriceCents = typeof filters['maxPriceCents'] === 'number' ? (filters['maxPriceCents'] as number) : null;
+    const minRating = typeof filters['minRating'] === 'number' ? (filters['minRating'] as number) : null;
+    this.filtersForm.patchValue({
+      query: item.query ?? '',
+      category: categories[0] ?? this.categories[0]?.key ?? '',
+      subcategory: subcategories[0] ?? '',
+      region: (filters['region'] as string | undefined) ?? '',
+      country: countries[0] ?? '',
+      latitude,
+      longitude,
+      radiusKm: radius,
+      minPrice: minPriceCents != null ? minPriceCents / 100 : null,
+      maxPrice: maxPriceCents != null ? maxPriceCents / 100 : null,
+      minRating
+    });
+  }
+
+  async toggleFavorite(result: ProviderSearchResult): Promise<void> {
+    const listingId = result.listing.id;
+    if (this.favoriteProcessing.has(listingId)) {
+      return;
+    }
+    this.favoriteProcessing.add(listingId);
+    try {
+      if (this.favorites.has(listingId)) {
+        await firstValueFrom(this.api.removeFavorite(listingId));
+        this.favorites.delete(listingId);
+        result.listing.attributes = { ...result.listing.attributes, favorited: false };
+      } else {
+        await firstValueFrom(this.api.addFavorite(listingId));
+        this.favorites.add(listingId);
+        result.listing.attributes = { ...result.listing.attributes, favorited: true };
+      }
+    } catch (error) {
+      console.error('Failed to toggle favorite', error);
+    } finally {
+      this.favoriteProcessing.delete(listingId);
+    }
+  }
+
+  isFavorited(result: ProviderSearchResult): boolean {
+    return this.favorites.has(result.listing.id) || !!result.listing.attributes?.['favorited'];
   }
 
   categoryLabel(result: ProviderSearchResult): string {
@@ -158,7 +250,19 @@ export class MatchingPage implements OnInit {
     }
     const country = (value.country as string | null)?.trim();
     if (country) {
-      filters.countries = [country];
+      filters.countries = [country.toLowerCase()];
+    }
+    const latitude = this.toNumber(value.latitude);
+    if (latitude != null) {
+      filters.latitude = latitude;
+    }
+    const longitude = this.toNumber(value.longitude);
+    if (longitude != null) {
+      filters.longitude = longitude;
+    }
+    const radiusKm = this.toNumber(value.radiusKm);
+    if (radiusKm != null) {
+      filters.radiusKm = radiusKm;
     }
     const minPrice = this.toNumber(value.minPrice);
     if (minPrice != null) {
@@ -188,11 +292,17 @@ export class MatchingPage implements OnInit {
   }
 
   private toNumber(input: unknown): number | null {
+    if (input === null || input === undefined || input === '') {
+      return null;
+    }
     const num = Number(input);
     return Number.isFinite(num) ? num : null;
   }
 
   private toInteger(input: unknown): number | null {
+    if (input === null || input === undefined || input === '') {
+      return null;
+    }
     const num = Number(input);
     return Number.isInteger(num) ? num : null;
   }
@@ -204,5 +314,41 @@ export class MatchingPage implements OnInit {
       .map(part => (part ? part[0].toUpperCase() + part.slice(1) : ''))
       .join(' ')
       .trim();
+  }
+
+  private async loadSearchHistory(): Promise<void> {
+    try {
+      const response = await firstValueFrom(this.api.getSearchHistory());
+      this.history = response.data.history ?? [];
+    } catch {
+      // Ignore auth errors (user might be anonymous)
+      this.history = [];
+    }
+  }
+
+  private async loadRecommendations(): Promise<void> {
+    try {
+      const response = await firstValueFrom(this.api.getRecommended(8));
+      this.recommended = response.data.results ?? [];
+      this.refreshFavoritesSet(this.recommended);
+    } catch {
+      this.recommended = [];
+    }
+  }
+
+  private refreshFavoritesSet(extraResults: ProviderSearchResult[] = []): void {
+    const combined = [...this.results, ...extraResults];
+    const next = new Set<string>();
+    for (const result of combined) {
+      if (result.listing.attributes?.['favorited']) {
+        next.add(result.listing.id);
+      }
+    }
+    for (const id of this.favorites) {
+      if (!next.has(id)) {
+        next.add(id);
+      }
+    }
+    this.favorites = next;
   }
 }

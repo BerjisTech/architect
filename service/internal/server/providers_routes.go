@@ -66,6 +66,11 @@ func registerProviderRoutes(
 	protected.Post("/providers/categories", h.upsertCategory)
 	protected.Post("/providers/categories/:categoryKey/subcategories", h.upsertSubcategory)
 	protected.Post("/providers/categories/:categoryKey/attributes", h.upsertAttribute)
+	protected.Get("/providers/favorites", h.listFavorites)
+	protected.Post("/providers/favorites/:listingId", h.addFavorite)
+	protected.Delete("/providers/favorites/:listingId", h.removeFavorite)
+	protected.Get("/providers/search/history", h.getSearchHistory)
+	protected.Get("/providers/recommended", h.getRecommended)
 
 	protected.Get("/providers/listings/:id/availability", h.getAvailability)
 	protected.Put("/providers/listings/:id/availability", h.setAvailability)
@@ -87,6 +92,28 @@ func (h providerHandler) searchProviders(c *fiber.Ctx) error {
 	filters.Subcategories = queryList(c, "subcategory")
 	filters.CountryCodes = queryList(c, "country")
 	filters.Region = strings.TrimSpace(c.Query("region"))
+
+	if v := strings.TrimSpace(c.Query("lat")); v != "" {
+		lat, err := strconv.ParseFloat(v, 64)
+		if err != nil {
+			return badRequest(c, "lat must be numeric")
+		}
+		filters.Latitude = &lat
+	}
+	if v := strings.TrimSpace(c.Query("lng")); v != "" {
+		lng, err := strconv.ParseFloat(v, 64)
+		if err != nil {
+			return badRequest(c, "lng must be numeric")
+		}
+		filters.Longitude = &lng
+	}
+	if v := strings.TrimSpace(c.Query("radiusKm")); v != "" {
+		radius, err := strconv.ParseFloat(v, 64)
+		if err != nil {
+			return badRequest(c, "radiusKm must be numeric")
+		}
+		filters.RadiusKm = &radius
+	}
 
 	if v := strings.TrimSpace(c.Query("limit")); v != "" {
 		limit, err := strconv.Atoi(v)
@@ -147,12 +174,30 @@ func (h providerHandler) searchProviders(c *fiber.Ctx) error {
 		filters.EndMinute = &end
 	}
 
+	filters.Limit = limitOrDefault(filters.Limit)
+
 	results, err := h.store.SearchPublicListings(c.Context(), filters)
 	if err != nil {
 		if isCategoryValidationError(err) {
 			return badRequest(c, err.Error())
 		}
 		return serverError(c, err)
+	}
+
+	userUUID := auth.UserID(c)
+	if strings.TrimSpace(userUUID) != "" {
+		_ = h.store.RecordSearch(c.Context(), userUUID, filters)
+		favorites, favErr := h.store.FavoriteIDs(c.Context(), userUUID)
+		if favErr == nil && len(favorites) > 0 {
+			for idx := range results {
+				if _, ok := favorites[results[idx].Listing.ID]; ok {
+					if results[idx].Listing.Attributes == nil {
+						results[idx].Listing.Attributes = map[string]any{}
+					}
+					results[idx].Listing.Attributes["favorited"] = true
+				}
+			}
+		}
 	}
 
 	return c.JSON(fiber.Map{
@@ -283,6 +328,96 @@ func (h providerHandler) upsertAttribute(c *fiber.Ctx) error {
 		return serverError(c, err)
 	}
 	return c.JSON(fiber.Map{"success": true, "data": fiber.Map{"attribute": attr}})
+}
+
+func (h providerHandler) listFavorites(c *fiber.Ctx) error {
+	userUUID := auth.UserID(c)
+	if strings.TrimSpace(userUUID) == "" {
+		return unauthorized(c)
+	}
+	limit := 50
+	if v := strings.TrimSpace(c.Query("limit")); v != "" {
+		if parsed, err := strconv.Atoi(v); err == nil && parsed > 0 {
+			limit = parsed
+		}
+	}
+	listings, err := h.store.ListFavorites(c.Context(), userUUID, limit)
+	if err != nil {
+		return serverError(c, err)
+	}
+	for i := range listings {
+		if listings[i].Attributes == nil {
+			listings[i].Attributes = map[string]any{}
+		}
+		listings[i].Attributes["favorited"] = true
+	}
+	return c.JSON(fiber.Map{"success": true, "data": fiber.Map{"listings": listings}})
+}
+
+func (h providerHandler) addFavorite(c *fiber.Ctx) error {
+	userUUID := auth.UserID(c)
+	if strings.TrimSpace(userUUID) == "" {
+		return unauthorized(c)
+	}
+	listingID := strings.TrimSpace(c.Params("listingId"))
+	if listingID == "" {
+		return badRequest(c, "listing id required")
+	}
+	if err := h.store.AddFavorite(c.Context(), userUUID, listingID); err != nil {
+		return serverError(c, err)
+	}
+	return c.JSON(fiber.Map{"success": true})
+}
+
+func (h providerHandler) removeFavorite(c *fiber.Ctx) error {
+	userUUID := auth.UserID(c)
+	if strings.TrimSpace(userUUID) == "" {
+		return unauthorized(c)
+	}
+	listingID := strings.TrimSpace(c.Params("listingId"))
+	if listingID == "" {
+		return badRequest(c, "listing id required")
+	}
+	if err := h.store.RemoveFavorite(c.Context(), userUUID, listingID); err != nil {
+		return serverError(c, err)
+	}
+	return c.JSON(fiber.Map{"success": true})
+}
+
+func (h providerHandler) getSearchHistory(c *fiber.Ctx) error {
+	userUUID := auth.UserID(c)
+	if strings.TrimSpace(userUUID) == "" {
+		return unauthorized(c)
+	}
+	limit := 10
+	if v := strings.TrimSpace(c.Query("limit")); v != "" {
+		if parsed, err := strconv.Atoi(v); err == nil && parsed > 0 {
+			limit = parsed
+		}
+	}
+	history, err := h.store.RecentSearches(c.Context(), userUUID, limit)
+	if err != nil {
+		return serverError(c, err)
+	}
+	return c.JSON(fiber.Map{"success": true, "data": fiber.Map{"history": history}})
+}
+
+func (h providerHandler) getRecommended(c *fiber.Ctx) error {
+	userUUID := auth.UserID(c)
+	if strings.TrimSpace(userUUID) == "" {
+		return unauthorized(c)
+	}
+	limit := 12
+	if v := strings.TrimSpace(c.Query("limit")); v != "" {
+		if parsed, err := strconv.Atoi(v); err == nil && parsed > 0 {
+			limit = parsed
+		}
+	}
+	results, err := h.store.RecommendationsForUser(c.Context(), userUUID, limit)
+	if err != nil {
+		return serverError(c, err)
+	}
+	return c.JSON(fiber.Map{"success": true, "data": fiber.Map{"results": results}})
 }
 
 // Onboarding ---------------------------------------------------------------------
@@ -735,9 +870,11 @@ type serviceAreaRequest struct {
 }
 
 type serviceAreaPayload struct {
-	Region      string  `json:"region"`
-	CountryCode *string `json:"countryCode"`
-	Notes       *string `json:"notes"`
+	Region      string   `json:"region"`
+	CountryCode *string  `json:"countryCode"`
+	Latitude    *float64 `json:"latitude"`
+	Longitude   *float64 `json:"longitude"`
+	Notes       *string  `json:"notes"`
 }
 
 func (r serviceAreaRequest) toAreas() []providers.ServiceArea {
@@ -746,6 +883,8 @@ func (r serviceAreaRequest) toAreas() []providers.ServiceArea {
 		areas = append(areas, providers.ServiceArea{
 			Region:      strings.TrimSpace(area.Region),
 			CountryCode: area.CountryCode,
+			Latitude:    area.Latitude,
+			Longitude:   area.Longitude,
 			Notes:       area.Notes,
 		})
 	}

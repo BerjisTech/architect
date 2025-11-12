@@ -42,6 +42,8 @@ export interface ServiceArea {
   listingId: string;
   region: string;
   countryCode?: string | null;
+  latitude?: number | null;
+  longitude?: number | null;
   notes?: string | null;
   createdAt: string;
   updatedAt: string;
@@ -66,4 +68,12 @@ export interface ProviderSearchResult {
   location?: string | null;
   averageRating: number;
   reviewCount: number;
+  distanceKm?: number | null;
+  score: number;
+}
+
+export interface SearchHistoryItem {
+  query: string;
+  filters: Record<string, unknown>;
+  searchedAt: string;
 }

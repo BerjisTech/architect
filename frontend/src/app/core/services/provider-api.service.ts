@@ -8,7 +8,8 @@ import {
   ServiceArea,
   Analytics,
   OnboardingListResponse,
-  ProviderSearchResult
+  ProviderSearchResult,
+  SearchHistoryItem
 } from '../../models/providers';
 import { ProviderProfileDefinition } from '../../models/profile-types';
 import { ServiceCategory } from '../../models/categories';
@@ -28,6 +29,8 @@ type AnalyticsResponse = ApiResponse<{ analytics: Analytics }>;
 type PendingResponse = ApiResponse<OnboardingListResponse>;
 type CategoriesResponse = ApiResponse<{ categories: ServiceCategory[] }>;
 type SearchResponse = ApiResponse<{ results: ProviderSearchResult[]; meta: SearchMeta }>;
+type FavoritesResponse = ApiResponse<{ listings: Listing[] }>;
+type HistoryResponse = ApiResponse<{ history: SearchHistoryItem[] }>;
 
 interface SearchMeta {
   limit: number;
@@ -131,6 +134,53 @@ export class ProviderApiService {
     });
   }
 
+  listFavorites(limit?: number): Observable<FavoritesResponse> {
+    let params = new HttpParams();
+    if (limit != null) {
+      params = params.set('limit', limit.toString());
+    }
+    return this.http.get<FavoritesResponse>(`${this.base}/favorites`, {
+      params,
+      withCredentials: true
+    });
+  }
+
+  addFavorite(listingId: string): Observable<ApiResponse<unknown>> {
+    return this.http.post<ApiResponse<unknown>>(
+      `${this.base}/favorites/${encodeURIComponent(listingId)}`,
+      {},
+      { withCredentials: true }
+    );
+  }
+
+  removeFavorite(listingId: string): Observable<ApiResponse<unknown>> {
+    return this.http.delete<ApiResponse<unknown>>(`${this.base}/favorites/${encodeURIComponent(listingId)}`, {
+      withCredentials: true
+    });
+  }
+
+  getSearchHistory(limit?: number): Observable<HistoryResponse> {
+    let params = new HttpParams();
+    if (limit != null) {
+      params = params.set('limit', limit.toString());
+    }
+    return this.http.get<HistoryResponse>(`${this.base}/search/history`, {
+      params,
+      withCredentials: true
+    });
+  }
+
+  getRecommended(limit?: number): Observable<SearchResponse> {
+    let params = new HttpParams();
+    if (limit != null) {
+      params = params.set('limit', limit.toString());
+    }
+    return this.http.get<SearchResponse>(`${this.base}/recommended`, {
+      params,
+      withCredentials: true
+    });
+  }
+
   createListing(payload: ListingRequest): Observable<ListingResponse> {
     return this.http.post<ListingResponse>(`${this.base}/listings`, payload, { withCredentials: true });
   }
@@ -212,6 +262,8 @@ export interface AvailabilitySlotRequest {
 export interface ServiceAreaRequest {
   region: string;
   countryCode?: string | null;
+  latitude?: number | null;
+  longitude?: number | null;
   notes?: string | null;
 }
 
@@ -221,6 +273,9 @@ export interface ProviderSearchFilters {
   subcategories?: string[];
   countries?: string[];
   region?: string;
+  latitude?: number;
+  longitude?: number;
+  radiusKm?: number;
   minPrice?: number;
   maxPrice?: number;
   minRating?: number;

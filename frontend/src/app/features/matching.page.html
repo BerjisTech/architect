@@ -1,9 +1,9 @@
-<section class="container section space-y-8">
+<section class="container section space-y-10">
   <header class="space-y-2">
     <h1 class="text-3xl font-semibold text-slate-900">Find Specialists</h1>
     <p class="max-w-2xl text-sm text-slate-600">
-      Search verified providers across architecture, construction, surveying, legal and logistics services.
-      Refine results by category, location, price range, rating, and availability to match your project needs.
+      Search verified providers across architecture, construction, surveying, legal, materials, and logistics services.
+      Combine keywords with geolocation, pricing, availability, and rating filters to pinpoint the right team for your project.
     </p>
   </header>
 
@@ -11,7 +11,7 @@
     <div class="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
       <label>
         <span>Keywords</span>
-        <input type="text" formControlName="query" placeholder="Search by service, skills, or keywords" />
+        <input type="text" formControlName="query" placeholder="e.g., landscape design, legal review, MEP audit" />
       </label>
 
       <label>
@@ -32,12 +32,27 @@
 
       <label>
         <span>Country</span>
-        <input type="text" formControlName="country" placeholder="e.g., KE, UG, TZ" />
+        <input type="text" formControlName="country" placeholder="ISO code e.g., KE, UG, TZ" />
       </label>
 
       <label>
         <span>Region / City</span>
         <input type="text" formControlName="region" placeholder="City, county, or region" />
+      </label>
+
+      <label>
+        <span>Latitude</span>
+        <input type="number" formControlName="latitude" step="0.0001" min="-90" max="90" placeholder="-1.2921" />
+      </label>
+
+      <label>
+        <span>Longitude</span>
+        <input type="number" formControlName="longitude" step="0.0001" min="-180" max="180" placeholder="36.8219" />
+      </label>
+
+      <label>
+        <span>Radius (km)</span>
+        <input type="number" formControlName="radiusKm" min="0" step="1" placeholder="50" />
       </label>
 
       <label>
@@ -83,34 +98,78 @@
       <button type="button" class="btn-ghost" (click)="resetFilters()" [disabled]="loading">
         Reset Filters
       </button>
+      <button type="button" class="btn-ghost" (click)="useMyLocation()" [disabled]="locationLoading">
+        {{ locationLoading ? 'Locating…' : 'Use My Location' }}
+      </button>
       <span class="text-xs text-slate-500" *ngIf="initialized">
         Showing {{ resultMeta.count }} providers · limit {{ resultMeta.limit }}
       </span>
     </div>
+
+    <div *ngIf="history.length" class="space-y-2">
+      <h3 class="text-xs font-semibold uppercase tracking-wide text-slate-500">Recent searches</h3>
+      <div class="flex flex-wrap gap-2">
+        <button type="button" class="chip" *ngFor="let item of history" (click)="applyHistory(item)">
+          {{ item.query || (item.filters?.['categories']?.[0] | titlecase) || 'Custom filters' }}
+        </button>
+      </div>
+    </div>
   </form>
+
+  <section *ngIf="recommended.length" class="space-y-3">
+    <div class="flex items-center justify-between">
+      <h2 class="text-lg font-semibold text-slate-900">Recommended for you</h2>
+      <span class="text-xs text-slate-500">Tailored from your favourites and recent searches</span>
+    </div>
+    <div class="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+      <article *ngFor="let result of recommended" class="rounded-2xl border border-blue-100 bg-white p-5 space-y-3 transition-shadow hover:shadow-lg">
+        <header class="flex items-start justify-between gap-3">
+          <div>
+            <h3 class="text-base font-semibold text-slate-900">{{ result.listing.title }}</h3>
+            <p class="text-xs text-slate-600">
+              {{ categoryLabel(result) }}
+              <ng-container *ngIf="subcategoryLabel(result) as sub"> · {{ sub }}</ng-container>
+            </p>
+          </div>
+          <button type="button" class="btn-icon" [class.btn-icon-active]="isFavorited(result)" (click)="toggleFavorite(result)">
+            <span class="material-symbols-outlined text-base">{{ isFavorited(result) ? 'favorite' : 'favorite_border' }}</span>
+          </button>
+        </header>
+        <p class="text-sm text-slate-600 line-clamp-3" *ngIf="result.listing.summary">{{ result.listing.summary }}</p>
+        <footer class="flex flex-wrap gap-2 text-xs text-slate-600">
+          <span *ngIf="result.listing.pricingModel">{{ result.listing.pricingModel | titlecase }}</span>
+          <span>{{ (result.listing.basePriceCents / 100) | currency:'USD':'symbol':'1.0-0' }}</span>
+        <span *ngIf="result.distanceKm !== null && result.distanceKm !== undefined">{{ result.distanceKm | number:'1.1-1' }} km away</span>
+        </footer>
+      </article>
+    </div>
+  </section>
 
   <div *ngIf="error" class="alert alert--error">
     {{ error }}
   </div>
 
   <div *ngIf="!error && !loading && results.length === 0" class="rounded-2xl border border-dashed border-slate-300 bg-white/60 p-6 text-center">
-    <h2>No providers found</h2>
-    <p>Try adjusting your filters or broaden the search criteria.</p>
+    <h2 class="text-lg font-semibold text-slate-900">No providers found</h2>
+    <p class="text-sm text-slate-600">Try adjusting your filters or broaden the search criteria.</p>
   </div>
 
   <div *ngIf="results.length" class="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
     <article *ngFor="let result of results" class="rounded-2xl border border-slate-200 bg-white/90 p-5 space-y-4 transition-shadow hover:shadow-lg">
-      <header class="space-y-1">
-        <h3 class="text-lg font-semibold text-slate-900">{{ result.listing.title }}</h3>
-        <p class="text-sm text-slate-600">
-          {{ categoryLabel(result) }}
-          <ng-container *ngIf="subcategoryLabel(result) as sub">
-            • {{ sub }}
-          </ng-container>
-        </p>
+      <header class="flex items-start justify-between gap-3">
+        <div class="space-y-1">
+          <h3 class="text-lg font-semibold text-slate-900">{{ result.listing.title }}</h3>
+          <p class="text-sm text-slate-600">
+            {{ categoryLabel(result) }}
+            <ng-container *ngIf="subcategoryLabel(result) as sub"> · {{ sub }}</ng-container>
+          </p>
+        </div>
+        <button type="button" class="btn-icon" [class.btn-icon-active]="isFavorited(result)" (click)="toggleFavorite(result)" [disabled]="favoriteProcessing.has(result.listing.id)">
+          <span class="material-symbols-outlined">{{ isFavorited(result) ? 'favorite' : 'favorite_border' }}</span>
+        </button>
       </header>
 
-      <p class="text-sm text-slate-600" *ngIf="result.listing.summary">{{ result.listing.summary }}</p>
+      <p class="text-sm text-slate-600 line-clamp-4" *ngIf="result.listing.summary">{{ result.listing.summary }}</p>
 
       <dl class="grid grid-cols-2 gap-3 text-xs text-slate-600">
         <div>
@@ -128,6 +187,14 @@
             </ng-container>
             <ng-template #unrated>Not yet rated</ng-template>
           </dd>
+        </div>
+        <div *ngIf="result.distanceKm !== null && result.distanceKm !== undefined">
+          <dt>Distance</dt>
+          <dd>{{ result.distanceKm | number:'1.1-1' }} km</dd>
+        </div>
+        <div *ngIf="result.score !== undefined">
+          <dt>Match Score</dt>
+          <dd>{{ result.score | number:'1.2-2' }}</dd>
         </div>
         <div *ngIf="result.location">
           <dt>Location</dt>

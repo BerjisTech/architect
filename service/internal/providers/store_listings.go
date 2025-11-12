@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"strings"
 	"time"
 )
@@ -56,6 +57,9 @@ type SearchFilters struct {
 	MinPriceCents int64
 	MaxPriceCents int64
 	MinRating     float64
+	Latitude      *float64
+	Longitude     *float64
+	RadiusKm      *float64
 	DayOfWeek     *int
 	StartMinute   *int
 	EndMinute     *int
@@ -65,12 +69,14 @@ type SearchFilters struct {
 
 // SearchResult wraps a listing with enriched discovery metadata.
 type SearchResult struct {
-	Listing       Listing `json:"listing"`
-	DisplayName   *string `json:"displayName,omitempty"`
-	ProfileType   string  `json:"profileType"`
-	Location      *string `json:"location,omitempty"`
-	AverageRating float64 `json:"averageRating"`
-	ReviewCount   int     `json:"reviewCount"`
+	Listing       Listing  `json:"listing"`
+	DisplayName   *string  `json:"displayName,omitempty"`
+	ProfileType   string   `json:"profileType"`
+	Location      *string  `json:"location,omitempty"`
+	AverageRating float64  `json:"averageRating"`
+	ReviewCount   int      `json:"reviewCount"`
+	DistanceKm    *float64 `json:"distanceKm,omitempty"`
+	Score         float64  `json:"score"`
 }
 
 // AvailabilitySlot models weekly availability for a listing.
@@ -90,6 +96,8 @@ type ServiceArea struct {
 	ListingID   string    `json:"listingId"`
 	Region      string    `json:"region"`
 	CountryCode *string   `json:"countryCode,omitempty"`
+	Latitude    *float64  `json:"latitude,omitempty"`
+	Longitude   *float64  `json:"longitude,omitempty"`
 	Notes       *string   `json:"notes,omitempty"`
 	CreatedAt   time.Time `json:"createdAt"`
 	UpdatedAt   time.Time `json:"updatedAt"`
@@ -283,17 +291,34 @@ func (s *Store) SearchPublicListings(ctx context.Context, filters SearchFilters)
 		conditions []string
 	)
 
+	latPlaceholder := "NULL"
+	lngPlaceholder := "NULL"
+	if filters.Latitude != nil && filters.Longitude != nil {
+		args = append(args, *filters.Latitude)
+		latPlaceholder = fmt.Sprintf("$%d", len(args))
+		args = append(args, *filters.Longitude)
+		lngPlaceholder = fmt.Sprintf("$%d", len(args))
+	}
+
 	baseQuery := strings.Builder{}
-	baseQuery.WriteString(`
+	baseQuery.WriteString(fmt.Sprintf(`
 		SELECT
 			l.id, l.user_uuid, l.title, l.summary, l.description, l.category, l.subcategory,
 			l.pricing_model, l.base_price_cents, l.currency, l.status, l.attributes,
 			l.created_at, l.updated_at,
 			COALESCE(r.avg_rating, 0) AS average_rating,
 			COALESCE(r.review_count, 0) AS review_count,
+			COALESCE(prs.total_responses, 0) AS total_responses,
+			COALESCE(prs.jobs_completed, 0) AS jobs_completed,
+			COALESCE(prs.average_minutes, 0) AS average_response_minutes,
 			p.display_name,
 			p.profile_type,
-			p.location
+			p.location,
+			area.region,
+			area.country_code,
+			area.latitude,
+			area.longitude,
+			area.distance_km
 		FROM service_listings l
 		INNER JOIN profiles p ON p.user_uuid = l.user_uuid
 		LEFT JOIN (
@@ -301,8 +326,27 @@ func (s *Store) SearchPublicListings(ctx context.Context, filters SearchFilters)
 			FROM profile_reviews
 			GROUP BY user_uuid
 		) r ON r.user_uuid = l.user_uuid
+		LEFT JOIN provider_response_stats prs ON prs.user_uuid = l.user_uuid
+		LEFT JOIN LATERAL (
+			SELECT sa.region,
+			       sa.country_code,
+			       sa.latitude,
+			       sa.longitude,
+			       CASE
+			           WHEN %s IS NULL OR %s IS NULL OR sa.latitude IS NULL OR sa.longitude IS NULL THEN NULL
+			           ELSE 6371 * acos(
+			               cos(radians(%s)) * cos(radians(sa.latitude)) *
+			               cos(radians(sa.longitude) - radians(%s)) +
+			               sin(radians(%s)) * sin(radians(sa.latitude))
+			           )
+			       END AS distance_km
+			FROM service_areas sa
+			WHERE sa.listing_id = l.id
+			ORDER BY distance_km NULLS FIRST, sa.created_at ASC
+			LIMIT 1
+		) area ON TRUE
 		WHERE l.status = 'active'
-	`)
+	`, latPlaceholder, lngPlaceholder, latPlaceholder, lngPlaceholder, latPlaceholder))
 
 	if q := strings.TrimSpace(filters.Query); q != "" {
 		args = append(args, q)
@@ -335,6 +379,17 @@ func (s *Store) SearchPublicListings(ctx context.Context, filters SearchFilters)
 	}
 	if clause := appendStringList(&args, filters.CountryCodes); clause != "" {
 		conditions = append(conditions, fmt.Sprintf(`EXISTS (SELECT 1 FROM service_areas sa WHERE sa.listing_id = l.id AND LOWER(sa.country_code) IN (%s))`, clause))
+	}
+	if filters.RadiusKm != nil {
+		if filters.Latitude == nil || filters.Longitude == nil {
+			return nil, errors.New("categories: radius requires latitude and longitude")
+		}
+		radius := *filters.RadiusKm
+		if radius < 0 {
+			radius = 0
+		}
+		args = append(args, radius)
+		conditions = append(conditions, fmt.Sprintf("area.distance_km IS NOT NULL AND area.distance_km <= $%d", len(args)))
 	}
 	if filters.DayOfWeek != nil {
 		args = append(args, *filters.DayOfWeek)
@@ -384,14 +439,24 @@ func (s *Store) SearchPublicListings(ctx context.Context, filters SearchFilters)
 			updatedAt      time.Time
 			avgRating      sql.NullFloat64
 			reviewCount    sql.NullInt64
+			totalResponses sql.NullInt64
+			jobsCompleted  sql.NullInt64
+			avgRespMinutes sql.NullFloat64
 			displayName    sql.NullString
 			profileType    string
 			location       sql.NullString
+			areaRegion     sql.NullString
+			areaCountry    sql.NullString
+			areaLat        sql.NullFloat64
+			areaLng        sql.NullFloat64
+			distanceKm     sql.NullFloat64
 		)
 		if err := rows.Scan(
 			&listingID, &userUUID, &title, &summary, &description, &category, &subcategory,
 			&pricingModel, &basePriceCents, &currency, &status, &attributesJSON, &createdAt, &updatedAt,
-			&avgRating, &reviewCount, &displayName, &profileType, &location,
+			&avgRating, &reviewCount, &totalResponses, &jobsCompleted, &avgRespMinutes,
+			&displayName, &profileType, &location,
+			&areaRegion, &areaCountry, &areaLat, &areaLng, &distanceKm,
 		); err != nil {
 			return nil, err
 		}
@@ -419,11 +484,19 @@ func (s *Store) SearchPublicListings(ctx context.Context, filters SearchFilters)
 		}
 		result := SearchResult{
 			Listing:       listing,
-			DisplayName:   nullableStringPtr(displayName),
+			DisplayName:   nil,
 			ProfileType:   profileType,
-			Location:      nullableStringPtr(location),
+			Location:      nil,
 			AverageRating: 0,
 			ReviewCount:   0,
+			DistanceKm:    nil,
+			Score:         0,
+		}
+		if displayName.Valid {
+			name := strings.TrimSpace(displayName.String)
+			if name != "" {
+				result.DisplayName = &name
+			}
 		}
 		if avgRating.Valid {
 			result.AverageRating = avgRating.Float64
@@ -431,6 +504,33 @@ func (s *Store) SearchPublicListings(ctx context.Context, filters SearchFilters)
 		if reviewCount.Valid {
 			result.ReviewCount = int(reviewCount.Int64)
 		}
+		if distanceKm.Valid {
+			d := distanceKm.Float64
+			result.DistanceKm = &d
+		}
+		if areaRegion.Valid && strings.TrimSpace(areaRegion.String) != "" {
+			region := strings.TrimSpace(areaRegion.String)
+			if areaCountry.Valid && strings.TrimSpace(areaCountry.String) != "" {
+				country := strings.TrimSpace(areaCountry.String)
+				loc := region
+				if country != "" {
+					loc = region + ", " + country
+				}
+				result.Location = &loc
+			} else {
+				loc := region
+				result.Location = &loc
+			}
+		} else if location.Valid {
+			loc := strings.TrimSpace(location.String)
+			if loc != "" {
+				result.Location = &loc
+			}
+		}
+
+		score := computeSearchScore(result, updatedAt, totalResponses.Int64, jobsCompleted.Int64, avgRespMinutes.Float64, result.DistanceKm)
+		result.Score = score
+
 		results = append(results, result)
 	}
 	return results, rows.Err()
@@ -492,7 +592,7 @@ func (s *Store) SetAvailability(ctx context.Context, listingID, userUUID string,
 
 func (s *Store) GetServiceAreas(ctx context.Context, listingID string) ([]ServiceArea, error) {
 	rows, err := s.db.QueryxContext(ctx, `
-		SELECT id, listing_id, region, country_code, notes, created_at, updated_at
+		SELECT id, listing_id, region, country_code, latitude, longitude, notes, created_at, updated_at
 		FROM service_areas
 		WHERE listing_id=$1
 		ORDER BY created_at ASC
@@ -509,18 +609,31 @@ func (s *Store) GetServiceAreas(ctx context.Context, listingID string) ([]Servic
 			lid         string
 			region      string
 			countryCode sql.NullString
+			latitude    sql.NullFloat64
+			longitude   sql.NullFloat64
 			notes       sql.NullString
 			createdAt   time.Time
 			updatedAt   time.Time
 		)
-		if err := rows.Scan(&id, &lid, &region, &countryCode, &notes, &createdAt, &updatedAt); err != nil {
+		if err := rows.Scan(&id, &lid, &region, &countryCode, &latitude, &longitude, &notes, &createdAt, &updatedAt); err != nil {
 			return nil, err
+		}
+		var latPtr, lngPtr *float64
+		if latitude.Valid {
+			value := latitude.Float64
+			latPtr = &value
+		}
+		if longitude.Valid {
+			value := longitude.Float64
+			lngPtr = &value
 		}
 		areas = append(areas, ServiceArea{
 			ID:          id,
 			ListingID:   lid,
 			Region:      region,
 			CountryCode: nullableStringPtr(countryCode),
+			Latitude:    latPtr,
+			Longitude:   lngPtr,
 			Notes:       nullableStringPtr(notes),
 			CreatedAt:   createdAt,
 			UpdatedAt:   updatedAt,
@@ -553,11 +666,24 @@ func (s *Store) SetServiceAreas(ctx context.Context, listingID, userUUID string,
 		if area.CountryCode != nil {
 			country = strings.ToUpper(strings.TrimSpace(*area.CountryCode))
 		}
+		var latPtr, lngPtr any
+		if area.Latitude != nil && area.Longitude != nil {
+			lat := *area.Latitude
+			lng := *area.Longitude
+			if lat < -90 || lat > 90 {
+				return errors.New("providers: latitude must be between -90 and 90")
+			}
+			if lng < -180 || lng > 180 {
+				return errors.New("providers: longitude must be between -180 and 180")
+			}
+			latPtr = lat
+			lngPtr = lng
+		}
 		notes := nullable(area.Notes)
 		if _, err := tx.ExecContext(ctx, `
-			INSERT INTO service_areas (listing_id, region, country_code, notes, created_at, updated_at)
-			VALUES ($1,$2,$3,$4,$5,$5)
-		`, listingID, region, nullable(&country), notes, now); err != nil {
+			INSERT INTO service_areas (listing_id, region, country_code, latitude, longitude, notes, created_at, updated_at)
+			VALUES ($1,$2,$3,$4,$5,$6,$7,$7)
+		`, listingID, region, nullable(&country), latPtr, lngPtr, notes, now); err != nil {
 			return err
 		}
 	}
@@ -723,6 +849,9 @@ func appendStringList(args *[]any, values []string) string {
 		*args = append(*args, trimmed)
 		placeholders = append(placeholders, fmt.Sprintf("$%d", len(*args)))
 	}
+	if len(placeholders) == 0 {
+		return ""
+	}
 	return strings.Join(placeholders, ",")
 }
 
@@ -744,4 +873,39 @@ func (s *Store) validateCategory(ctx context.Context, category string, subcatego
 		subPtr = &key
 	}
 	return catDef.Key, subPtr, sanitized, nil
+}
+
+func computeSearchScore(result SearchResult, updatedAt time.Time, totalResponses, jobsCompleted int64, avgResponseMinutes float64, distanceKm *float64) float64 {
+	ratingScore := 0.0
+	if result.AverageRating > 0 {
+		ratingScore = math.Min(result.AverageRating/5.0, 1.0)
+	}
+	responseScore := math.Min(float64(totalResponses)/50.0, 1.0)
+	jobsScore := math.Min(float64(jobsCompleted)/100.0, 1.0)
+	responsiveness := 0.0
+	if avgResponseMinutes > 0 {
+		responsiveness = 1 / (1 + (avgResponseMinutes / 60.0))
+	}
+	recencyDays := time.Since(updatedAt).Hours() / 24.0
+	if recencyDays < 0 {
+		recencyDays = 0
+	}
+	recencyScore := 1 / (1 + recencyDays/7.0)
+	distancePenalty := 0.0
+	if distanceKm != nil && *distanceKm >= 0 {
+		distancePenalty = math.Min(*distanceKm/200.0, 1.0)
+	}
+	score := (0.45 * ratingScore) +
+		(0.15 * responseScore) +
+		(0.1 * jobsScore) +
+		(0.1 * responsiveness) +
+		(0.2 * recencyScore) -
+		(0.1 * distancePenalty)
+	if score < 0 {
+		return 0
+	}
+	if score > 1 {
+		return 1
+	}
+	return score
 }

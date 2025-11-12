@@ -62,6 +62,8 @@ export class ProviderDashboardPage implements OnInit {
   areaForm = this.fb.group({
     region: ['', Validators.required],
     countryCode: [''],
+    latitude: [null, [Validators.min(-90), Validators.max(90)]],
+    longitude: [null, [Validators.min(-180), Validators.max(180)]],
     notes: ['']
   });
 
@@ -495,13 +497,15 @@ export class ProviderDashboardPage implements OnInit {
         listingId: this.selectedListing.id,
         region: this.areaForm.value.region ?? '',
         countryCode: emptyToNull(this.areaForm.value.countryCode),
+        latitude: toNumberOrUndefined(this.areaForm.value.latitude),
+        longitude: toNumberOrUndefined(this.areaForm.value.longitude),
         notes: emptyToNull(this.areaForm.value.notes),
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString()
       }
     ];
     await this.saveAreas(areas.map(toAreaRequest));
-    this.areaForm.reset({ region: '', countryCode: '', notes: '' });
+    this.areaForm.reset({ region: '', countryCode: '', latitude: null, longitude: null, notes: '' });
   }
 
   async removeArea(area: ServiceArea): Promise<void> {
@@ -604,6 +608,14 @@ function emptyToNull(value: string | number | null | undefined): string | null |
   return str.length === 0 ? undefined : str;
 }
 
+function toNumberOrUndefined(value: unknown): number | undefined {
+  if (value === null || value === undefined || value === '') {
+    return undefined;
+  }
+  const num = Number(value);
+  return Number.isFinite(num) ? num : undefined;
+}
+
 function toStringArray(value: unknown): string[] {
   if (value == null) {
     return [];
@@ -634,6 +646,8 @@ function toAreaRequest(area: ServiceArea): ServiceAreaRequest {
   return {
     region: area.region,
     countryCode: area.countryCode ?? undefined,
+    latitude: area.latitude ?? undefined,
+    longitude: area.longitude ?? undefined,
     notes: area.notes ?? undefined
   };
 }
