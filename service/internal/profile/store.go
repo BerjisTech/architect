@@ -268,14 +268,14 @@ func applyUpdate(p *Profile, params UpdateParams) {
 
 func calculateCompletion(p Profile) (int, map[string]bool) {
 	sections := map[string]bool{
-		"profileType": strings.TrimSpace(string(p.ProfileType)) != "",
-		"displayName": strings.TrimSpace(deref(p.DisplayName)) != "",
-		"headline":    strings.TrimSpace(deref(p.Headline)) != "",
-		"bio":         strings.TrimSpace(deref(p.Bio)) != "",
-		"location":    strings.TrimSpace(deref(p.Location)) != "",
-		"contact":     strings.TrimSpace(deref(p.Phone)) != "" || strings.TrimSpace(deref(p.Website)) != "",
-		"company":     strings.TrimSpace(deref(p.CompanyName)) != "",
-		"portfolio":   len(p.Portfolio) > 0,
+		"profileType":    strings.TrimSpace(string(p.ProfileType)) != "",
+		"displayName":    strings.TrimSpace(deref(p.DisplayName)) != "",
+		"headline":       strings.TrimSpace(deref(p.Headline)) != "",
+		"bio":            strings.TrimSpace(deref(p.Bio)) != "",
+		"location":       strings.TrimSpace(deref(p.Location)) != "",
+		"contact":        strings.TrimSpace(deref(p.Phone)) != "" || strings.TrimSpace(deref(p.Website)) != "",
+		"company":        strings.TrimSpace(deref(p.CompanyName)) != "",
+		"portfolio":      len(p.Portfolio) > 0,
 		"certifications": len(p.Certifications) > 0,
 	}
 

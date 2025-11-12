@@ -15,6 +15,7 @@ import (
 	"github.com/berjistech/berjis-ecosystem/architect/service/internal/auth"
 	"github.com/berjistech/berjis-ecosystem/architect/service/internal/coreapi"
 	"github.com/berjistech/berjis-ecosystem/architect/service/internal/profile"
+	"github.com/berjistech/berjis-ecosystem/architect/service/internal/providers"
 	coreauth "github.com/berjistech/berjis-ecosystem/shared/coreauth"
 )
 
@@ -79,6 +80,9 @@ func New(opts Options) *fiber.App {
 	if db != nil {
 		profileStore := profile.NewStore(db)
 		registerProfileRoutes(public, protected, profileStore, db)
+
+		providerStore := providers.NewStore(db)
+		registerProviderRoutes(public, protected, providerStore, db, opts.CoreAPIClient, logger)
 	}
 
 	// Floorplans CRUD

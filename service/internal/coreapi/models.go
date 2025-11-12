@@ -125,3 +125,9 @@ type UserSearchResult struct {
 	Username *string `json:"username,omitempty"`
 	Name     *string `json:"name,omitempty"`
 }
+
+// AppRoleRequest represents a request to add or remove an app-scoped role.
+type AppRoleRequest struct {
+	Role     string `json:"role"`
+	UserUUID string `json:"userUuid,omitempty"`
+}

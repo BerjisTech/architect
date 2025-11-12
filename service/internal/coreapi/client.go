@@ -424,3 +424,72 @@ func (c *Client) SearchUsers(ctx context.Context, query string, limit int) ([]Us
 	}
 	return decodeEnvelope[[]UserSearchResult](resp)
 }
+
+// App Enrollment & Roles -------------------------------------------------------
+
+// EnrollApp enrolls a user into an app. When userUUID is empty the current session user is used.
+func (c *Client) EnrollApp(ctx context.Context, appKey string, userUUID string) error {
+	path := fmt.Sprintf("/v1/apps/%s", url.PathEscape(appKey))
+	var payload map[string]string
+	if strings.TrimSpace(userUUID) != "" {
+		payload = map[string]string{"userUuid": strings.TrimSpace(userUUID)}
+	}
+	resp, err := c.request(ctx, http.MethodPost, path, payload)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	var env Envelope[struct{}]
+	if err := json.NewDecoder(resp.Body).Decode(&env); err != nil {
+		return fmt.Errorf("coreapi: decode response: %w", err)
+	}
+	if !env.Success {
+		return &APIError{StatusCode: resp.StatusCode, Message: env.Message}
+	}
+	return nil
+}
+
+// AddAppRole adds an app-scoped role to the user.
+func (c *Client) AddAppRole(ctx context.Context, appKey string, role string, userUUID string) error {
+	path := fmt.Sprintf("/v1/apps/%s/roles", url.PathEscape(appKey))
+	req := AppRoleRequest{Role: role}
+	if strings.TrimSpace(userUUID) != "" {
+		req.UserUUID = strings.TrimSpace(userUUID)
+	}
+	resp, err := c.request(ctx, http.MethodPost, path, req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	var env Envelope[struct{}]
+	if err := json.NewDecoder(resp.Body).Decode(&env); err != nil {
+		return fmt.Errorf("coreapi: decode response: %w", err)
+	}
+	if !env.Success {
+		return &APIError{StatusCode: resp.StatusCode, Message: env.Message}
+	}
+	return nil
+}
+
+// RemoveAppRole removes an app-scoped role from the user.
+func (c *Client) RemoveAppRole(ctx context.Context, appKey string, role string, userUUID string) error {
+	params := url.Values{}
+	params.Set("role", role)
+	if strings.TrimSpace(userUUID) != "" {
+		params.Set("userUuid", strings.TrimSpace(userUUID))
+	}
+	path := fmt.Sprintf("/v1/apps/%s/roles?%s", url.PathEscape(appKey), params.Encode())
+	resp, err := c.request(ctx, http.MethodDelete, path, nil)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 400 {
+		var env Envelope[struct{}]
+		if err := json.NewDecoder(resp.Body).Decode(&env); err == nil && env.Message != "" {
+			return &APIError{StatusCode: resp.StatusCode, Message: env.Message}
+		}
+		return &APIError{StatusCode: resp.StatusCode, Message: resp.Status}
+	}
+	return nil
+}

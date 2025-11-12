@@ -1,0 +1,68 @@
+<div class="onboarding" *ngIf="!loading; else loadingTpl">
+  <h1 class="page-title">Service Provider Onboarding</h1>
+
+  <div class="alert alert--error" *ngIf="error">{{ error }}</div>
+
+  <section class="card" *ngIf="status; else noStatusTpl">
+    <h2>Status</h2>
+    <p><strong>Stage:</strong> {{ stageLabel(status?.stage) | titlecase }}</p>
+    <p><strong>Profile Type:</strong> {{ status?.profileType | titlecase }}</p>
+    <p><strong>Profile Completion:</strong> {{ status?.profileCompleted ? 'Complete' : 'Incomplete' }}</p>
+    <p><strong>Verification:</strong> {{ status?.verificationStatus | titlecase }}</p>
+    <p class="meta">Submitted {{ status?.submittedAt | date:'medium' }}</p>
+    <p class="meta" *ngIf="status?.reviewedAt">Reviewed {{ status?.reviewedAt | date:'medium' }}</p>
+    <p *ngIf="status?.notes">{{ status?.notes }}</p>
+  </section>
+
+  <section class="card">
+    <h2>Submit / Update Request</h2>
+    <form [formGroup]="submitForm" (ngSubmit)="submit()">
+      <label>
+        Profile Type
+        <select formControlName="profileType" required>
+          <option value="" disabled>Select type</option>
+          <option *ngFor="let option of profileOptions" [value]="option.type">{{ option.label }}</option>
+        </select>
+      </label>
+      <p class="hint">
+        Ensure your profile is at least 60% complete with portfolio items and certifications before submitting. Approved providers receive the appropriate <code>architect.&lt;role&gt;</code> permissions.
+      </p>
+      <button type="submit" [disabled]="submitForm.invalid || submitting">
+        {{ status ? 'Resubmit' : 'Submit' }} Onboarding
+      </button>
+    </form>
+  </section>
+
+  <section class="card" *ngIf="isPrivileged()">
+    <div class="section-header">
+      <h2>Pending Requests</h2>
+    </div>
+    <form [formGroup]="notesForm" class="notes-form">
+      <label>Review Notes<textarea rows="2" formControlName="notes" placeholder="Optional notes for approvals or rejections"></textarea></label>
+    </form>
+    <ul class="pending-list">
+      <li *ngFor="let request of pending">
+        <div>
+          <strong>{{ request.userUuid }}</strong> — {{ request.profileType | titlecase }} ({{ request.stage | titlecase }})
+          <span class="meta">Submitted {{ request.submittedAt | date:'medium' }}</span>
+        </div>
+        <div class="actions">
+          <button type="button" (click)="review(request, 'in_review')">Mark In Review</button>
+          <button type="button" (click)="review(request, 'approved')" class="success">Approve</button>
+          <button type="button" (click)="review(request, 'rejected')" class="danger">Reject</button>
+        </div>
+      </li>
+      <li *ngIf="!pending.length" class="empty">No pending requests.</li>
+    </ul>
+  </section>
+</div>
+
+<ng-template #noStatusTpl>
+  <section class="card">
+    <p>No onboarding request submitted yet. Complete your profile and submit to start the review process.</p>
+  </section>
+</ng-template>
+
+<ng-template #loadingTpl>
+  <p>Loading onboarding status…</p>
+</ng-template>

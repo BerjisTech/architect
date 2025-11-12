@@ -29,7 +29,7 @@ const (
 type ProfileType string
 
 const (
-	ProfileHomeowner       ProfileType = "homeowner"
+	ProfileHomeowner        ProfileType = "homeowner"
 	ProfileArchitect        ProfileType = "architect"
 	ProfileQuantitySurveyor ProfileType = "quantity_surveyor"
 	ProfileLandSurveyor     ProfileType = "land_surveyor"
@@ -115,7 +115,7 @@ var ProviderProfiles = []ProviderProfile{
 
 // ProviderRoleByType maps a profile type to the role key required for access.
 var ProviderRoleByType = map[ProfileType]RoleKey{
-	ProfileHomeowner:       RoleArchitectHomeowner,
+	ProfileHomeowner:        RoleArchitectHomeowner,
 	ProfileArchitect:        RoleArchitectArchitect,
 	ProfileQuantitySurveyor: RoleArchitectQuantitySurveyor,
 	ProfileLandSurveyor:     RoleArchitectLandSurveyor,
@@ -129,7 +129,7 @@ var ProviderRoleByType = map[ProfileType]RoleKey{
 
 // ProviderTypeLabels exposes a convenient lookup for display names.
 var ProviderTypeLabels = map[ProfileType]string{
-	ProfileHomeowner:       "Homeowner",
+	ProfileHomeowner:        "Homeowner",
 	ProfileArchitect:        "Architect / Consultant",
 	ProfileQuantitySurveyor: "Quantity Surveyor",
 	ProfileLandSurveyor:     "Land Surveyor",

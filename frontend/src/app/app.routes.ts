@@ -45,6 +45,18 @@ export const appRoutes: Routes = [
     title: 'My Profile'
   },
   {
+    path: 'provider/onboarding',
+    canActivate: [ensureAuthGuard],
+    loadComponent: () => import('./features/provider-onboarding.page').then(m => m.ProviderOnboardingPage),
+    title: 'Provider Onboarding'
+  },
+  {
+    path: 'provider/dashboard',
+    canActivate: [ensureAuthGuard],
+    loadComponent: () => import('./features/provider-dashboard.page').then(m => m.ProviderDashboardPage),
+    title: 'Provider Dashboard'
+  },
+  {
     path: 'profiles/:userUuid',
     loadComponent: () => import('./features/profile-view.page').then(m => m.ProfileViewPage),
     title: 'Profile'

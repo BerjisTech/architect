@@ -74,29 +74,29 @@ type PortfolioInput struct {
 }
 
 type Certification struct {
-	ID           string    `json:"id"`
-	UserUUID     string    `json:"userUuid"`
-	Name         string    `json:"name"`
-	Issuer       *string   `json:"issuer,omitempty"`
-	IssuedOn     *time.Time `json:"issuedOn,omitempty"`
-	ExpiresOn    *time.Time `json:"expiresOn,omitempty"`
-	CredentialID *string   `json:"credentialId,omitempty"`
-	CredentialURL *string  `json:"credentialUrl,omitempty"`
-	Status       string    `json:"status"`
-	ReviewedBy   *string   `json:"reviewedBy,omitempty"`
-	ReviewedAt   *time.Time `json:"reviewedAt,omitempty"`
-	CreatedAt    time.Time `json:"createdAt"`
-	UpdatedAt    time.Time `json:"updatedAt"`
+	ID            string     `json:"id"`
+	UserUUID      string     `json:"userUuid"`
+	Name          string     `json:"name"`
+	Issuer        *string    `json:"issuer,omitempty"`
+	IssuedOn      *time.Time `json:"issuedOn,omitempty"`
+	ExpiresOn     *time.Time `json:"expiresOn,omitempty"`
+	CredentialID  *string    `json:"credentialId,omitempty"`
+	CredentialURL *string    `json:"credentialUrl,omitempty"`
+	Status        string     `json:"status"`
+	ReviewedBy    *string    `json:"reviewedBy,omitempty"`
+	ReviewedAt    *time.Time `json:"reviewedAt,omitempty"`
+	CreatedAt     time.Time  `json:"createdAt"`
+	UpdatedAt     time.Time  `json:"updatedAt"`
 }
 
 type CertificationInput struct {
-	ID            *string   `json:"id,omitempty"`
-	Name          string    `json:"name"`
-	Issuer        *string   `json:"issuer,omitempty"`
+	ID            *string    `json:"id,omitempty"`
+	Name          string     `json:"name"`
+	Issuer        *string    `json:"issuer,omitempty"`
 	IssuedOn      *time.Time `json:"issuedOn,omitempty"`
 	ExpiresOn     *time.Time `json:"expiresOn,omitempty"`
-	CredentialID  *string   `json:"credentialId,omitempty"`
-	CredentialURL *string   `json:"credentialUrl,omitempty"`
+	CredentialID  *string    `json:"credentialId,omitempty"`
+	CredentialURL *string    `json:"credentialUrl,omitempty"`
 }
 
 type Review struct {
@@ -112,10 +112,10 @@ type Review struct {
 }
 
 type ReviewInput struct {
-	Rating   int      `json:"rating"`
-	Title    *string  `json:"title,omitempty"`
-	Comment  *string  `json:"comment,omitempty"`
-	IsPublic *bool    `json:"isPublic,omitempty"`
+	Rating   int     `json:"rating"`
+	Title    *string `json:"title,omitempty"`
+	Comment  *string `json:"comment,omitempty"`
+	IsPublic *bool   `json:"isPublic,omitempty"`
 }
 
 type ReviewSummary struct {

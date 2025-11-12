@@ -1,0 +1,189 @@
+<div class="provider-dashboard" *ngIf="!loading; else loadingTpl">
+  <h1 class="page-title">Provider Dashboard</h1>
+
+  <div class="alert alert--error" *ngIf="error">{{ error }}</div>
+
+  <ng-container *ngIf="!providerAccessBlocked; else blockedTpl">
+    <section class="card">
+      <div class="section-header">
+        <h2>Performance Overview</h2>
+      </div>
+      <ng-container *ngIf="analytics; else analyticsFallback">
+        <dl class="analytics-grid">
+          <div>
+            <dt>Total Listings</dt>
+            <dd>{{ analytics.totalListings }}</dd>
+          </div>
+          <div>
+            <dt>Active Listings</dt>
+            <dd>{{ analytics.activeListings }}</dd>
+          </div>
+          <div>
+            <dt>Average Response (min)</dt>
+            <dd>{{ analytics.averageResponseMinutes | number:'1.0-1' }}</dd>
+          </div>
+          <div>
+            <dt>Total Responses</dt>
+            <dd>{{ analytics.totalResponses }}</dd>
+          </div>
+          <div>
+            <dt>Jobs Completed</dt>
+            <dd>{{ analytics.jobsCompleted }}</dd>
+          </div>
+        </dl>
+      </ng-container>
+    </section>
+
+    <section class="card">
+      <div class="section-header">
+        <h2>Response Tracking</h2>
+      </div>
+      <form [formGroup]="responseForm" (ngSubmit)="recordResponse()" class="subform">
+        <label>Elapsed Minutes
+          <input type="number" min="0" formControlName="elapsedMinutes" />
+        </label>
+        <label class="checkbox-field">
+          <input type="checkbox" formControlName="jobCompleted" />
+          <span>Job Completed</span>
+        </label>
+        <button type="submit" [disabled]="responseForm.invalid || recording">
+          {{ recording ? 'Recording...' : 'Record Response' }}
+        </button>
+      </form>
+    </section>
+
+    <section class="card">
+      <div class="section-header">
+        <h2>Service Listings</h2>
+        <button type="button" (click)="selectListing(null)" [disabled]="saving">New Listing</button>
+      </div>
+      <ul class="item-list">
+        <li *ngFor="let listing of listings" [class.active]="selectedListing?.id === listing.id">
+          <div>
+            <strong>{{ listing.title }}</strong>
+            <p class="meta">
+              {{ listing.category | titlecase }} | {{ listing.pricingModel | titlecase }} | {{ listing.status | titlecase }}
+            </p>
+          </div>
+          <div class="actions">
+            <button type="button" (click)="selectListing(listing)">Edit</button>
+            <button type="button" class="danger" (click)="deleteListing(listing)">Delete</button>
+          </div>
+        </li>
+        <li *ngIf="!listings.length" class="empty">No listings yet.</li>
+      </ul>
+    </section>
+
+    <section class="card">
+      <h2>{{ listingForm.value.id ? 'Edit Listing' : 'Create Listing' }}</h2>
+      <form [formGroup]="listingForm" (ngSubmit)="saveListing()">
+        <div class="grid">
+          <label>Title<input type="text" formControlName="title" /></label>
+          <label>Category
+            <select formControlName="category">
+              <option *ngFor="let option of categories" [value]="option">{{ option | titlecase }}</option>
+            </select>
+          </label>
+          <label>Pricing Model
+            <select formControlName="pricingModel">
+              <option *ngFor="let option of pricingModels" [value]="option">{{ option | titlecase }}</option>
+            </select>
+          </label>
+          <label>Status
+            <select formControlName="status">
+              <option *ngFor="let option of statuses" [value]="option">{{ option | titlecase }}</option>
+            </select>
+          </label>
+          <label>Base Price
+            <input type="number" min="0" formControlName="basePrice" />
+          </label>
+          <label>Currency
+            <input type="text" maxlength="3" formControlName="currency" />
+          </label>
+          <label class="span-2">Summary
+            <input type="text" formControlName="summary" />
+          </label>
+          <label class="span-2">Description
+            <textarea rows="4" formControlName="description"></textarea>
+          </label>
+        </div>
+        <button type="submit" [disabled]="listingForm.invalid || saving">
+          {{ saving ? 'Saving...' : (listingForm.value.id ? 'Update Listing' : 'Create Listing') }}
+        </button>
+      </form>
+    </section>
+
+    <section class="card" *ngIf="selectedListing">
+      <div class="section-header">
+        <h2>Availability</h2>
+      </div>
+      <form [formGroup]="availabilityForm" (ngSubmit)="addAvailability()" class="subform">
+        <label>Day
+          <select formControlName="dayOfWeek">
+            <option *ngFor="let day of dayOptions" [value]="day">
+              {{ dayNames[day] }}
+            </option>
+          </select>
+        </label>
+        <label>Start Minute
+          <input type="number" formControlName="startMinute" min="0" max="1440" />
+        </label>
+        <label>End Minute
+          <input type="number" formControlName="endMinute" min="0" max="1440" />
+        </label>
+        <button type="submit">Add Slot</button>
+      </form>
+      <ul class="item-list">
+        <li *ngFor="let slot of availability">
+          <div>
+            <strong>{{ dayShortNames[slot.dayOfWeek] }}</strong>
+            <span class="meta">{{ formatMinutes(slot.startMinute) }} - {{ formatMinutes(slot.endMinute) }}</span>
+          </div>
+          <div class="actions">
+            <button type="button" class="danger" (click)="removeAvailability(slot)">Remove</button>
+          </div>
+        </li>
+        <li *ngIf="!availability.length" class="empty">No availability slots configured.</li>
+      </ul>
+    </section>
+
+    <section class="card" *ngIf="selectedListing">
+      <div class="section-header">
+        <h2>Service Areas</h2>
+      </div>
+      <form [formGroup]="areaForm" (ngSubmit)="addArea()" class="subform">
+        <label>Region<input type="text" formControlName="region" /></label>
+        <label>Country Code<input type="text" maxlength="3" formControlName="countryCode" /></label>
+        <label class="span-2">Notes<textarea rows="2" formControlName="notes"></textarea></label>
+        <button type="submit">Add Area</button>
+      </form>
+      <ul class="item-list">
+        <li *ngFor="let area of serviceAreas">
+          <div>
+            <strong>{{ area.region }}</strong>
+            <span class="meta">{{ area.countryCode || 'N/A' }}</span>
+            <p *ngIf="area.notes">{{ area.notes }}</p>
+          </div>
+          <div class="actions">
+            <button type="button" class="danger" (click)="removeArea(area)">Remove</button>
+          </div>
+        </li>
+        <li *ngIf="!serviceAreas.length" class="empty">No service areas defined.</li>
+      </ul>
+    </section>
+  </ng-container>
+</div>
+
+<ng-template #analyticsFallback>
+  <p class="empty">Analytics will appear after your first response event.</p>
+</ng-template>
+
+<ng-template #blockedTpl>
+  <div class="alert alert--info">
+    Provider onboarding is pending approval. Complete onboarding in the Provider Onboarding page to unlock dashboard tools.
+  </div>
+</ng-template>
+
+<ng-template #loadingTpl>
+  <p>Loading provider dashboard.</p>
+</ng-template>
