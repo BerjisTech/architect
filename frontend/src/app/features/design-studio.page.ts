@@ -28,7 +28,7 @@ type Room = { id: string; x: number; y: number; w: number; h: number; height: nu
 type WallDragAnchor = { wall: Wall; end: 'a'|'b'; point: Point };
 type MeasurementSegment = { id: string; a: Point; b: Point; length: number };
 type WallFace = { id: string; corners: [Point, Point, Point, Point]; wallId: string };
-type RoomMesh = { id: string; faces: [Point, Point, Point, Point][] };
+type RoomMesh = { id: string; faces: Point[][] };
 type ViewportBox = { minX: number; minY: number; width: number; height: number };
 type Bounds = { minX: number; minY: number; maxX: number; maxY: number };
 type LightingPreset = 'lit' | 'unlit' | 'wireframe' | 'detail';
@@ -160,6 +160,7 @@ export class DesignStudioPage implements OnInit, OnDestroy {
   roomDraftPoint: Point | null = null;
   roomClosePreview = false;
   autoDetectedRoomIds = new Set<string>();
+  private autoHighlightRoomIds = new Set<string>();
   private autoDetectHighlightTimer: number | null = null;
   selectedRoomId: string | null = null;
   dragging: null
@@ -1381,7 +1382,7 @@ export class DesignStudioPage implements OnInit, OnDestroy {
       this.setSaveState('idle', 'Add at least two corners before closing the room.');
       return;
     }
-    let points = this.roomPath.map(point => ({ ...point }));
+    const points = this.roomPath.map(point => ({ ...point }));
     if (forceCloseWithPreview && this.roomDraftPoint) {
       const last = points[points.length - 1];
       if (!this.samePoint(last, this.roomDraftPoint)) {
@@ -1520,7 +1521,72 @@ export class DesignStudioPage implements OnInit, OnDestroy {
   }
 
   isRoomAutoHighlighted(room: Room): boolean {
+    return this.autoHighlightRoomIds.has(room.id);
+  }
+
+  isAutoDetectedRoom(room: Room): boolean {
     return this.autoDetectedRoomIds.has(room.id);
+  }
+
+  roomHasFootprint(room: Room): boolean {
+    return Boolean(room.footprint && room.footprint.length >= 3);
+  }
+
+  roomFillColor(room: Room): string {
+    if (this.selectedRoomId === room.id) {
+      return '#bfdbfe';
+    }
+    if (this.isRoomAutoHighlighted(room)) {
+      return '#fde68a';
+    }
+    if (this.isAutoDetectedRoom(room)) {
+      return '#fef3c7';
+    }
+    return '#e0f2fe';
+  }
+
+  roomFillOpacity(room: Room): number {
+    if (this.selectedRoomId === room.id) {
+      return 0.55;
+    }
+    if (this.isRoomAutoHighlighted(room)) {
+      return 0.6;
+    }
+    if (this.isAutoDetectedRoom(room)) {
+      return 0.45;
+    }
+    return 0.35;
+  }
+
+  roomStrokeColor(room: Room): string {
+    if (this.selectedRoomId === room.id) {
+      return '#1d4ed8';
+    }
+    if (this.isAutoDetectedRoom(room)) {
+      return '#f59e0b';
+    }
+    return '#0ea5e9';
+  }
+
+  roomStrokeWidth(room: Room): number {
+    if (this.selectedRoomId === room.id) {
+      return 3;
+    }
+    if (this.isAutoDetectedRoom(room)) {
+      return 2.5;
+    }
+    return 2;
+  }
+
+  roomHandleColor(room: Room): string {
+    if (this.selectedRoomId === room.id) {
+      return '#1d4ed8';
+    }
+    return '#0ea5e9';
+  }
+
+  showRoomHandles(room: Room): boolean {
+    return !this.roomHasFootprint(room);
   }
 
   private promptDimension(label: string, defaultMeters: number): number | null {
@@ -1536,74 +1602,6 @@ export class DesignStudioPage implements OnInit, OnDestroy {
     return value * 1000;
   }
 
-  private getViewCenter(): Point {
-    return {
-      x: this.minX + this.width / 2,
-      y: this.minY + this.height / 2
-    };
-  }
-
-  private createRectangleFootprint(center: Point, width: number, depth: number): Point[] {
-    const halfW = width / 2;
-    const halfD = depth / 2;
-    return [
-      { x: center.x - halfW, y: center.y - halfD },
-      { x: center.x + halfW, y: center.y - halfD },
-      { x: center.x + halfW, y: center.y + halfD },
-      { x: center.x - halfW, y: center.y + halfD }
-    ];
-  }
-
-  private createCircularFootprint(center: Point, radius: number, segments = 24): Point[] {
-    const points: Point[] = [];
-    for (let i = 0; i < segments; i++) {
-      const angle = (Math.PI * 2 * i) / segments;
-      points.push({
-        x: center.x + radius * Math.cos(angle),
-        y: center.y + radius * Math.sin(angle)
-      });
-    }
-    return points;
-  }
-
-  private createLShapeFootprint(center: Point, width: number, depth: number, notchWidth: number, notchDepth: number): Point[] | null {
-    if (notchWidth >= width || notchDepth >= depth) {
-      return null;
-    }
-    const halfW = width / 2;
-    const halfD = depth / 2;
-    const notchX = halfW - notchWidth;
-    const notchY = -halfD + notchDepth;
-    return [
-      { x: center.x - halfW, y: center.y - halfD },
-      { x: center.x + halfW, y: center.y - halfD },
-      { x: center.x + halfW, y: center.y + notchY },
-      { x: center.x + notchX, y: center.y + notchY },
-      { x: center.x + notchX, y: center.y + halfD },
-      { x: center.x - halfW, y: center.y + halfD }
-    ];
-  }
-
-  private createUShapeFootprint(center: Point, width: number, depth: number, legThickness: number, openingWidth: number): Point[] | null {
-    if (legThickness >= depth || openingWidth >= width) {
-      return null;
-    }
-    const halfW = width / 2;
-    const halfD = depth / 2;
-    const openingHalf = openingWidth / 2;
-    const innerY = -halfD + legThickness;
-    return [
-      { x: center.x - halfW, y: center.y - halfD },
-      { x: center.x + halfW, y: center.y - halfD },
-      { x: center.x + halfW, y: center.y + innerY },
-      { x: center.x + openingHalf, y: center.y + innerY },
-      { x: center.x + openingHalf, y: center.y + halfD },
-      { x: center.x - openingHalf, y: center.y + halfD },
-      { x: center.x - openingHalf, y: center.y + innerY },
-      { x: center.x - halfW, y: center.y + innerY }
-    ];
-  }
-
   private instantiateRoomTemplate(points: Point[], templateName: string): void {
     const result = this.createRoomFromFootprint(points, { recordUndo: true, generateWalls: true });
     if (!result) {
@@ -1615,121 +1613,11 @@ export class DesignStudioPage implements OnInit, OnDestroy {
   }
 
 
-  private createRoomFromFootprint(points: Point[], options?: { recordUndo?: boolean; height?: number; generateWalls?: boolean }): { roomId: string; area: number } | null {
-    const height = options?.height ?? 3000;
-    const generateWalls = options?.generateWalls ?? true;
-    const cleaned: Point[] = [];
-    points.forEach(point => {
-      if (!cleaned.length || !this.samePoint(cleaned[cleaned.length - 1], point)) {
-        cleaned.push({ x: point.x, y: point.y });
-      }
-    });
-    if (cleaned.length < 3) {
-      return null;
-    }
-    if (this.samePoint(cleaned[0], cleaned[cleaned.length - 1])) {
-      cleaned.pop();
-    }
-    if (cleaned.length < 3) {
-      return null;
-    }
-    let area = this.polygonArea(cleaned);
-    if (!Number.isFinite(area) || Math.abs(area) < 1) {
-      return null;
-    }
-    if (area < 0) {
-      cleaned.reverse();
-      area = -area;
-    }
-    if (options?.recordUndo) {
-      this.pushUndoState('room create');
-    }
-    const newWallIds: string[] = [];
-    if (generateWalls) {
-      for (let i = 0; i < cleaned.length; i++) {
-        const a = cleaned[i];
-        const b = cleaned[(i + 1) % cleaned.length];
-        if (this.samePoint(a, b)) {
-          continue;
-        }
-        const base: Wall = {
-          id: this.uid(),
-          a: { ...a },
-          b: { ...b },
-          thickness: this.wallThickness,
-          height: this.wallHeight,
-          openings: [],
-          type: this.currentWallType,
-          offset: 0
-        };
-        const segments = this.splitAgainstAllWalls(base);
-        if (segments.length) {
-          segments.forEach(segment => newWallIds.push(segment.id));
-          this.walls.push(...segments);
-        }
-      }
-      if (newWallIds.length) {
-        this.mergeNearbyNodes();
-      }
-    }
-    this.rebuildMeshes();
-    this.invalidate3dCache();
-    let minX = Number.POSITIVE_INFINITY;
-    let minY = Number.POSITIVE_INFINITY;
-    let maxX = Number.NEGATIVE_INFINITY;
-    let maxY = Number.NEGATIVE_INFINITY;
-    cleaned.forEach(point => {
-      minX = Math.min(minX, point.x);
-      minY = Math.min(minY, point.y);
-      maxX = Math.max(maxX, point.x);
-      maxY = Math.max(maxY, point.y);
-    });
-    const roomId = this.uid();
-    this.rooms.push({
-      id: roomId,
-      x: minX,
-      y: minY,
-      w: Math.max(0, maxX - minX),
-      h: Math.max(0, maxY - minY),
-      height
-    });
-    this.selectedRoomId = roomId;
-    this.selectedWallIds = [];
-    this.selectedWallId = null;
-    this.selectedWallPoint = null;
-    this.selectedWallT = null;
-    return { roomId, area };
-  }
-
   private getViewCenter(): Point {
     return {
       x: this.minX + this.width / 2,
       y: this.minY + this.height / 2
     };
-  }
-
-  private promptDimension(label: string, defaultMeters: number): number | null {
-    const defaultValue = defaultMeters.toString();
-    const input = window.prompt(label, defaultValue);
-    if (input === null) {
-      return null;
-    }
-    const value = Number(input);
-    if (!Number.isFinite(value) || value <= 0) {
-      this.setSaveState('idle', 'Please enter a positive number.');
-      return null;
-    }
-    return value * 1000;
-  }
-
-  private instantiateRoomTemplate(points: Point[], templateName: string): void {
-    const result = this.createRoomFromFootprint(points, { recordUndo: true });
-    if (!result) {
-      this.setSaveState('error', `${templateName} room could not be created. Check the dimensions.`);
-      return;
-    }
-    const areaLabel = this.formatArea(result.area);
-    this.setSaveState('success', `${templateName} room created (${areaLabel}).`);
   }
 
   private createRectangleFootprint(center: Point, width: number, depth: number): Point[] {
@@ -2031,6 +1919,10 @@ export class DesignStudioPage implements OnInit, OnDestroy {
     };
   }
   private roomBounds(room: Room): Bounds {
+    const vertices = this.roomVertices(room);
+    if (vertices.length) {
+      return this.computeBounds(vertices);
+    }
     return {
       minX: room.x,
       minY: room.y,
@@ -2235,12 +2127,29 @@ export class DesignStudioPage implements OnInit, OnDestroy {
   }
   private uid(){ return Math.random().toString(36).slice(2,9); }
   private pickRoomAtPoint(point: Point): Room | null {
-    const margin = Math.max(10, this.gridSpacing * 0.1);
     for (let i = this.rooms.length - 1; i >= 0; i--) {
       const room = this.rooms[i];
-      const withinX = point.x >= room.x - margin && point.x <= room.x + room.w + margin;
-      const withinY = point.y >= room.y - margin && point.y <= room.y + room.h + margin;
-      if (withinX && withinY) {
+      const vertices = this.roomVertices(room);
+      if (!vertices.length) {
+        continue;
+      }
+      const bounds = this.computeBounds(vertices);
+      const margin = Math.max(10, this.gridSpacing * 0.1);
+      const withinX = point.x >= bounds.minX - margin && point.x <= bounds.maxX + margin;
+      const withinY = point.y >= bounds.minY - margin && point.y <= bounds.maxY + margin;
+      if (!withinX || !withinY) {
+        continue;
+      }
+      if (this.roomHasFootprint(room)) {
+        if (this.pointInPolygon(point, vertices)) {
+          return room;
+        }
+      } else if (
+        point.x >= room.x - margin &&
+        point.x <= room.x + room.w + margin &&
+        point.y >= room.y - margin &&
+        point.y <= room.y + room.h + margin
+      ) {
         return room;
       }
     }
@@ -3543,12 +3452,8 @@ export class DesignStudioPage implements OnInit, OnDestroy {
       points.push(wall.a, wall.b);
     }
     for (const room of this.rooms) {
-      points.push(
-        { x: room.x, y: room.y },
-        { x: room.x + room.w, y: room.y },
-        { x: room.x, y: room.y + room.h },
-        { x: room.x + room.w, y: room.y + room.h }
-      );
+      const vertices = this.roomVertices(room);
+      points.push(...vertices);
     }
     return this.boundsFromPoints(points);
   }
@@ -4123,6 +4028,9 @@ export class DesignStudioPage implements OnInit, OnDestroy {
     }
     // room corners
     for(const r of this.rooms){
+      if (this.roomHasFootprint(r)) {
+        continue;
+      }
       const pts=[ {pt:{x:r.x,y:r.y},name:'nw'}, {pt:{x:r.x+r.w,y:r.y},name:'ne'}, {pt:{x:r.x,y:r.y+r.h},name:'sw'}, {pt:{x:r.x+r.w,y:r.y+r.h},name:'se'} ] as const;
       for(const c of pts){ if(this.dist(p,c.pt)<20) return { kind:'room-corner', roomId:r.id, corner:c.name } as const; }
     }
@@ -4130,6 +4038,25 @@ export class DesignStudioPage implements OnInit, OnDestroy {
   }
   private samePoint(a:Point,b:Point){ return this.dist(a,b) < 1; }
   private dist(a:Point,b:Point){ const dx=b.x-a.x, dy=b.y-a.y; return Math.hypot(dx,dy); }
+  private pointInPolygon(point: Point, polygon: Point[]): boolean {
+    if (polygon.length < 3) {
+      return false;
+    }
+    let inside = false;
+    for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
+      const xi = polygon[i].x;
+      const yi = polygon[i].y;
+      const xj = polygon[j].x;
+      const yj = polygon[j].y;
+      const intersects =
+        (yi > point.y) !== (yj > point.y) &&
+        point.x < ((xj - xi) * (point.y - yi)) / (yj - yi || (yj > yi ? 1e-9 : -1e-9)) + xi;
+      if (intersects) {
+        inside = !inside;
+      }
+    }
+    return inside;
+  }
 
   private polygonArea(points: Point[]): number {
     if (points.length < 3) {
@@ -4558,21 +4485,252 @@ export class DesignStudioPage implements OnInit, OnDestroy {
     this.setSaveState('idle', 'Measurements cleared.');
   }
 
+  private applyAutoRoomDetection(): void {
+    const manualRooms = this.rooms.filter(room => !this.autoDetectedRoomIds.has(room.id));
+    const detectedRooms = this.detectRoomsFromWalls(manualRooms);
+    const newAutoIds = new Set(detectedRooms.map(room => room.id));
+    const autoChanged = !this.sameIdSet(this.autoDetectedRoomIds, newAutoIds);
+    this.autoDetectedRoomIds = newAutoIds;
+    if (autoChanged) {
+      if (this.autoDetectHighlightTimer !== null) {
+        window.clearTimeout(this.autoDetectHighlightTimer);
+        this.autoDetectHighlightTimer = null;
+      }
+      this.autoHighlightRoomIds = new Set(newAutoIds);
+      if (this.autoHighlightRoomIds.size > 0) {
+        this.autoDetectHighlightTimer = window.setTimeout(() => {
+          this.autoHighlightRoomIds = new Set();
+          this.autoDetectHighlightTimer = null;
+        }, 3200);
+      } else {
+        this.autoHighlightRoomIds = new Set();
+      }
+    }
+    const nextRooms = [...manualRooms, ...detectedRooms];
+    if (this.selectedRoomId && !nextRooms.some(room => room.id === this.selectedRoomId)) {
+      this.selectedRoomId = null;
+    }
+    this.rooms = nextRooms;
+  }
+
+  private detectRoomsFromWalls(manualRooms: Room[]): Room[] {
+    if (this.walls.length < 3) {
+      return [];
+    }
+    const manualKeys = new Set<string>();
+    manualRooms.forEach(room => {
+      const vertices = this.normalizePolygon(this.roomVertices(room));
+      if (vertices.length >= 3) {
+        const key = this.canonicalPolygonKey(vertices);
+        if (key) {
+          manualKeys.add(key);
+        }
+      }
+    });
+    const nodeMap = new Map<string, { point: Point; edges: DirectedEdge[] }>();
+    const edges: DirectedEdge[] = [];
+    const registerNode = (key: string, point: Point) => {
+      let node = nodeMap.get(key);
+      if (!node) {
+        node = { point: { x: point.x, y: point.y }, edges: [] };
+        nodeMap.set(key, node);
+      }
+      return node;
+    };
+    const addEdge = (wallId: string, start: Point, end: Point): DirectedEdge | null => {
+      const length = this.segLen(start, end);
+      if (length < 5) {
+        return null;
+      }
+      const fromKey = this.pointKey(start);
+      const toKey = this.pointKey(end);
+      const edge: DirectedEdge = {
+        id: `${wallId}:${fromKey}->${toKey}:${edges.length}`,
+        wallId,
+        fromKey,
+        toKey,
+        start: { x: start.x, y: start.y },
+        end: { x: end.x, y: end.y },
+        angle: this.normalizeAngle(Math.atan2(end.y - start.y, end.x - start.x))
+      };
+      edges.push(edge);
+      registerNode(fromKey, start).edges.push(edge);
+      return edge;
+    };
+
+    this.walls.forEach(wall => {
+      if (this.samePoint(wall.a, wall.b)) {
+        return;
+      }
+      const forward = addEdge(wall.id, wall.a, wall.b);
+      const backward = addEdge(wall.id, wall.b, wall.a);
+      if (forward && backward) {
+        forward.reverse = backward;
+        backward.reverse = forward;
+      }
+    });
+
+    nodeMap.forEach(node => node.edges.sort((a, b) => a.angle - b.angle));
+
+    const detected: Room[] = [];
+    const detectedKeys = new Set<string>();
+    const visited = new Set<DirectedEdge>();
+
+    const guardLimit = Math.max(edges.length * 4, 32);
+
+    for (const edge of edges) {
+      if (visited.has(edge)) {
+        continue;
+      }
+      const faceEdges: DirectedEdge[] = [];
+      let current: DirectedEdge | null = edge;
+      let success = false;
+      for (let step = 0; step < guardLimit && current; step++) {
+        if (faceEdges.includes(current)) {
+          if (current === edge) {
+            success = true;
+          }
+          break;
+        }
+        faceEdges.push(current);
+        const node = nodeMap.get(current.toKey);
+        if (!node) {
+          current = null;
+          break;
+        }
+        const reverse = current.reverse;
+        if (!reverse) {
+          current = null;
+          break;
+        }
+        const outgoing = node.edges;
+        if (!outgoing.length) {
+          current = null;
+          break;
+        }
+        const reverseIndex = outgoing.indexOf(reverse);
+        if (reverseIndex === -1) {
+          current = null;
+          break;
+        }
+        const nextEdge = outgoing[(reverseIndex + 1) % outgoing.length];
+        if (nextEdge === edge) {
+          success = true;
+          break;
+        }
+        current = nextEdge;
+      }
+      faceEdges.forEach(fe => visited.add(fe));
+      if (!success) {
+        continue;
+      }
+      const polygon = this.normalizePolygon(faceEdges.map(e => e.start));
+      if (polygon.length < 3) {
+        continue;
+      }
+      const area = this.polygonArea(polygon);
+      if (!Number.isFinite(area) || area <= 10000) {
+        continue;
+      }
+      if (area <= 0) {
+        continue;
+      }
+      const key = this.canonicalPolygonKey(polygon);
+      if (!key || manualKeys.has(key) || detectedKeys.has(key)) {
+        continue;
+      }
+      const bounds = this.computeBounds(polygon);
+      const room: Room = {
+        id: `auto-${this.hashString(key)}`,
+        x: bounds.minX,
+        y: bounds.minY,
+        w: Math.max(0, bounds.maxX - bounds.minX),
+        h: Math.max(0, bounds.maxY - bounds.minY),
+        height: this.wallHeight,
+        footprint: polygon.map(point => ({ x: point.x, y: point.y }))
+      };
+      detected.push(room);
+      detectedKeys.add(key);
+    }
+    return detected;
+  }
+
+  private normalizePolygon(points: Point[]): Point[] {
+    const result: Point[] = [];
+    points.forEach(point => {
+      if (!result.length || !this.samePoint(result[result.length - 1], point)) {
+        result.push({ x: point.x, y: point.y });
+      }
+    });
+    if (result.length >= 2 && this.samePoint(result[0], result[result.length - 1])) {
+      result.pop();
+    }
+    return result;
+  }
+
+  private canonicalPolygonKey(points: Point[]): string {
+    if (!points.length) {
+      return '';
+    }
+    const fingerprint = points.map(point => `${Math.round(point.x)}:${Math.round(point.y)}`);
+    const sequences: string[] = [];
+    const len = fingerprint.length;
+    for (let offset = 0; offset < len; offset++) {
+      const seq: string[] = [];
+      for (let i = 0; i < len; i++) {
+        seq.push(fingerprint[(i + offset) % len]);
+      }
+      sequences.push(seq.join('|'));
+    }
+    const reversed = [...fingerprint].reverse();
+    for (let offset = 0; offset < len; offset++) {
+      const seq: string[] = [];
+      for (let i = 0; i < len; i++) {
+        seq.push(reversed[(i + offset) % len]);
+      }
+      sequences.push(seq.join('|'));
+    }
+    sequences.sort();
+    return sequences[0] ?? '';
+  }
+
+  private hashString(input: string): string {
+    let hash = 0;
+    for (let i = 0; i < input.length; i++) {
+      hash = (hash * 31 + input.charCodeAt(i)) | 0;
+    }
+    return Math.abs(hash).toString(36);
+  }
+
+  private sameIdSet(a: Set<string>, b: Set<string>): boolean {
+    if (a.size !== b.size) {
+      return false;
+    }
+    for (const value of a) {
+      if (!b.has(value)) {
+        return false;
+      }
+    }
+    return true;
+  }
+
   private rebuildMeshes(): void {
+    this.applyAutoRoomDetection();
     const wallFaces: WallFace[] = [];
     for (const wall of this.walls) {
       const corners = this.wallOutlineCorners(wall);
       wallFaces.push({ id: wall.id, wallId: wall.id, corners });
     }
-    const roomMeshes: RoomMesh[] = this.rooms.map(room => ({
-      id: room.id,
-      faces: [[
-        { x: room.x, y: room.y },
-        { x: room.x + room.w, y: room.y },
-        { x: room.x + room.w, y: room.y + room.h },
-        { x: room.x, y: room.y + room.h }
-      ]]
-    }));
+    const roomMeshes: RoomMesh[] = [];
+    for (const room of this.rooms) {
+      const vertices = this.roomVertices(room);
+      if (vertices.length >= 3) {
+        roomMeshes.push({
+          id: room.id,
+          faces: [vertices]
+        });
+      }
+    }
     this.wallFaces = wallFaces;
     this.roomMeshes = roomMeshes;
     this.invalidate3dCache();

@@ -223,18 +223,20 @@
                   fill="url(#gridMajor)"/>
             <!-- Rooms -->
             <g>
-              <rect *ngFor="let r of visibleRooms"
-                    [attr.x]="r.x" [attr.y]="r.y" [attr.width]="r.w" [attr.height]="r.h"
-                    [attr.fill]="selectedRoomId===r.id ? '#bfdbfe' : '#e0f2fe'"
-                    [attr.fill-opacity]="selectedRoomId===r.id ? 0.5 : 0.35"
-                    [attr.stroke]="selectedRoomId===r.id ? '#1d4ed8' : '#0ea5e9'"
-                    [attr.stroke-width]="selectedRoomId===r.id ? 3 : 2" />
-              <g *ngFor="let r of visibleRooms" [attr.fill]="selectedRoomId===r.id ? '#1d4ed8' : '#0ea5e9'">
-                <circle [attr.cx]="r.x" [attr.cy]="r.y" r="8" />
-                <circle [attr.cx]="r.x+r.w" [attr.cy]="r.y" r="8" />
-                <circle [attr.cx]="r.x" [attr.cy]="r.y+r.h" r="8" />
-                <circle [attr.cx]="r.x+r.w" [attr.cy]="r.y+r.h" r="8" />
-              </g>
+              <ng-container *ngFor="let r of visibleRooms">
+                <path [attr.d]="roomFootprintPath(r)"
+                      [attr.fill]="roomFillColor(r)"
+                      [attr.fill-opacity]="roomFillOpacity(r)"
+                      [attr.stroke]="roomStrokeColor(r)"
+                      [attr.stroke-width]="roomStrokeWidth(r)"
+                      stroke-linejoin="round"></path>
+                <g *ngIf="showRoomHandles(r)" [attr.fill]="roomHandleColor(r)">
+                  <circle [attr.cx]="r.x" [attr.cy]="r.y" r="8" />
+                  <circle [attr.cx]="r.x + r.w" [attr.cy]="r.y" r="8" />
+                  <circle [attr.cx]="r.x" [attr.cy]="r.y + r.h" r="8" />
+                  <circle [attr.cx]="r.x + r.w" [attr.cy]="r.y + r.h" r="8" />
+                </g>
+              </ng-container>
             </g>
             <!-- Walls and openings -->
             <g>
