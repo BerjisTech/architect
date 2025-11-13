@@ -16,6 +16,7 @@ type Config struct {
 	CoreAPIServiceTokenFile string
 	AllowedOrigins          string
 	MigrationsDir           string
+	MediaUploadDir          string
 }
 
 func getenv(k, def string) string {
@@ -52,5 +53,6 @@ func Load() Config {
 		CoreAPIServiceTokenFile: getenv("CORE_API_SERVICE_TOKEN_FILE", ""),
 		AllowedOrigins:          getenv("ALLOWED_ORIGINS", "*"),
 		MigrationsDir:           getenv("MIGRATIONS_DIR", "migrations"),
+		MediaUploadDir:          getenv("MEDIA_UPLOAD_DIR", "uploads"),
 	}
 }

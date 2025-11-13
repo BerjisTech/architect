@@ -1,0 +1,235 @@
+.preview-page {
+  min-height: 100vh;
+  background: linear-gradient(180deg, rgba(15, 23, 42, 0.12) 0%, rgba(255, 255, 255, 0.95) 40%);
+}
+
+.hero {
+  position: relative;
+  min-height: 320px;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  padding: 4rem 1.5rem 3rem;
+  overflow: hidden;
+}
+
+.hero__image {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+}
+
+.hero__image img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.hero__overlay {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(180deg, rgba(15, 23, 42, 0.6) 0%, rgba(15, 23, 42, 0.9) 80%);
+  backdrop-filter: blur(6px);
+  z-index: 1;
+}
+
+.hero__content {
+  position: relative;
+  z-index: 2;
+  max-width: 960px;
+  width: 100%;
+  text-align: center;
+  color: #f8fafc;
+  display: grid;
+  gap: 1rem;
+}
+
+.hero__eyebrow {
+  text-transform: uppercase;
+  letter-spacing: 0.3rem;
+  font-size: 0.75rem;
+  margin: 0;
+  color: #93c5fd;
+}
+
+.hero h1 {
+  margin: 0;
+  font-size: clamp(2rem, 5vw, 3.4rem);
+  font-weight: 700;
+}
+
+.hero__summary {
+  margin: 0 auto;
+  max-width: 720px;
+  color: #e2e8f0;
+  font-size: 1.1rem;
+}
+
+.hero__meta,
+.hero__stats {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  font-size: 0.9rem;
+  color: #cbd5f5;
+}
+
+.hero__actions {
+  display: flex;
+  justify-content: center;
+  margin-top: 1rem;
+}
+
+.hero__cta {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.75rem 1.75rem;
+  background: linear-gradient(135deg, #38bdf8, #2563eb);
+  color: #ffffff;
+  font-weight: 600;
+  border-radius: 9999px;
+  text-decoration: none;
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.hero__cta:hover {
+  box-shadow: 0 12px 30px rgba(59, 130, 246, 0.35);
+  transform: translateY(-1px);
+}
+
+.preview__content {
+  max-width: 960px;
+  margin: -80px auto 4rem;
+  padding: 0 1.5rem;
+  display: grid;
+  gap: 1.5rem;
+}
+
+.card {
+  background: #ffffff;
+  border-radius: 1.2rem;
+  box-shadow: 0 24px 60px rgba(15, 23, 42, 0.08);
+  padding: 2rem;
+}
+
+:host-context(.dark) .card {
+  background: #0f172a;
+  box-shadow: 0 24px 60px rgba(8, 47, 73, 0.35);
+  color: #e2e8f0;
+}
+
+.card h2 {
+  margin-top: 0;
+  font-size: 1.6rem;
+}
+
+.description {
+  color: #334155;
+  line-height: 1.7;
+}
+
+:host-context(.dark) .description {
+  color: #cbd5f5;
+}
+
+.pricing {
+  margin-top: 1.5rem;
+  padding: 1rem 1.25rem;
+  border-radius: 0.85rem;
+  background: linear-gradient(135deg, rgba(37, 99, 235, 0.08), rgba(14, 116, 144, 0.15));
+  color: #1e3a8a;
+}
+
+.gallery {
+  display: grid;
+  gap: 1rem;
+}
+
+.gallery__hero {
+  position: relative;
+  overflow: hidden;
+  border-radius: 1rem;
+  margin: 0;
+}
+
+.gallery__hero img {
+  width: 100%;
+  height: auto;
+  display: block;
+  object-fit: cover;
+}
+
+.gallery__hero figcaption {
+  position: absolute;
+  left: 1rem;
+  bottom: 1rem;
+  background: rgba(15, 23, 42, 0.7);
+  color: #f8fafc;
+  padding: 0.35rem 0.75rem;
+  border-radius: 9999px;
+  font-size: 0.85rem;
+}
+
+.gallery__grid {
+  display: grid;
+  gap: 0.75rem;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+}
+
+.gallery__grid figure {
+  margin: 0;
+  border-radius: 0.85rem;
+  overflow: hidden;
+}
+
+.gallery__grid img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.documents {
+  list-style: none;
+  margin: 1rem 0 0;
+  padding: 0;
+  display: grid;
+  gap: 0.75rem;
+}
+
+.documents li {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 1rem;
+  padding: 0.75rem 1rem;
+  border-radius: 0.75rem;
+  background: rgba(226, 232, 240, 0.4);
+}
+
+.documents a {
+  color: #1d4ed8;
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.documents__meta {
+  font-size: 0.8rem;
+  color: #64748b;
+}
+
+.state {
+  min-height: 50vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.1rem;
+  color: #64748b;
+}
+
+.state--error {
+  color: #dc2626;
+}

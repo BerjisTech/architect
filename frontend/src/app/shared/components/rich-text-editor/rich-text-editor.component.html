@@ -1,0 +1,27 @@
+<div class="rte" [class.rte--focused]="isFocused" [class.rte--disabled]="disabled">
+  <div class="rte__toolbar">
+    <button type="button" title="Bold" aria-label="Bold" (click)="exec('bold')" [disabled]="disabled"><span>B</span></button>
+    <button type="button" title="Italic" aria-label="Italic" (click)="exec('italic')" [disabled]="disabled"><span><i>I</i></span></button>
+    <button type="button" title="Underline" aria-label="Underline" (click)="exec('underline')" [disabled]="disabled"><span><u>U</u></span></button>
+    <button type="button" title="Bulleted list" aria-label="Bulleted list" (click)="exec('insertUnorderedList')" [disabled]="disabled"><span>&bull;</span></button>
+    <button type="button" title="Numbered list" aria-label="Numbered list" (click)="exec('insertOrderedList')" [disabled]="disabled"><span>1.</span></button>
+    <button type="button" title="Quote" aria-label="Quote" (click)="formatBlock('BLOCKQUOTE')" [disabled]="disabled"><span>&ldquo;&rdquo;</span></button>
+    <button type="button" title="Heading" aria-label="Heading" (click)="formatBlock('H3')" [disabled]="disabled"><span>H3</span></button>
+    <button type="button" title="Insert link" aria-label="Insert link" (click)="insertLink()" [disabled]="disabled"><span>Link</span></button>
+    <button type="button" title="Clear formatting" aria-label="Clear formatting" (click)="clearFormatting()" [disabled]="disabled"><span>Clear</span></button>
+  </div>
+  <div
+    #editor
+    class="rte__editor"
+    role="textbox"
+    aria-multiline="true"
+    [attr.aria-label]="ariaLabel"
+    [attr.contenteditable]="disabled ? 'false' : 'true'"
+    [attr.data-placeholder]="placeholder"
+    spellcheck="true"
+    (input)="handleInput()"
+    (focus)="handleFocus()"
+    (blur)="handleBlur()"
+    (paste)="handlePaste($event)"
+  ></div>
+</div>

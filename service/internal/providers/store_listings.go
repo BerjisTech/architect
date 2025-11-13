@@ -9,6 +9,8 @@ import (
 	"math"
 	"strings"
 	"time"
+
+	"github.com/microcosm-cc/bluemonday"
 )
 
 var (
@@ -29,6 +31,10 @@ type Listing struct {
 	Currency       string         `json:"currency"`
 	Status         string         `json:"status"`
 	Attributes     map[string]any `json:"attributes"`
+	PreviewToken   string         `json:"previewToken"`
+	PublishedAt    *time.Time     `json:"publishedAt,omitempty"`
+	Media          []MediaAsset   `json:"media"`
+	Metrics        ListingMetrics `json:"metrics"`
 	CreatedAt      time.Time      `json:"createdAt"`
 	UpdatedAt      time.Time      `json:"updatedAt"`
 }
@@ -112,19 +118,64 @@ type Analytics struct {
 	JobsCompleted          int     `json:"jobsCompleted"`
 }
 
+// MediaAsset represents an uploaded media item (image/document) that belongs to a listing.
+type MediaAsset struct {
+	ID            string         `json:"id"`
+	ListingID     string         `json:"listingId"`
+	MediaType     string         `json:"mediaType"`
+	Title         string         `json:"title"`
+	Description   *string        `json:"description,omitempty"`
+	URL           string         `json:"url"`
+	PreviewURL    *string        `json:"previewUrl,omitempty"`
+	FileName      *string        `json:"fileName,omitempty"`
+	MimeType      *string        `json:"mimeType,omitempty"`
+	FileSizeBytes int64          `json:"fileSizeBytes"`
+	IsPrimary     bool           `json:"isPrimary"`
+	Position      int            `json:"position"`
+	Metadata      map[string]any `json:"metadata"`
+	CreatedAt     time.Time      `json:"createdAt"`
+	UpdatedAt     time.Time      `json:"updatedAt"`
+}
+
+// ListingMetrics tracks engagement counters for a listing.
+type ListingMetrics struct {
+	ViewCount     int64      `json:"viewCount"`
+	ContactCount  int64      `json:"contactCount"`
+	LastViewedAt  *time.Time `json:"lastViewedAt,omitempty"`
+	LastContactAt *time.Time `json:"lastContactAt,omitempty"`
+}
+
 func sanitizeListingInput(in ListingInput) ListingInput {
 	in.Title = strings.TrimSpace(in.Title)
 	in.Category = strings.TrimSpace(strings.ToLower(in.Category))
 	if in.Category == "" {
 		in.Category = "general"
 	}
+	if in.Summary != nil {
+		trimmed := strings.TrimSpace(*in.Summary)
+		if trimmed == "" {
+			in.Summary = nil
+		} else {
+			copy := trimmed
+			in.Summary = &copy
+		}
+	}
+	if in.Description != nil {
+		sanitized := sanitizeListingDescription(*in.Description)
+		if sanitized == "" {
+			in.Description = nil
+		} else {
+			copy := sanitized
+			in.Description = &copy
+		}
+	}
 	if in.Subcategory != nil {
 		trimmed := strings.TrimSpace(strings.ToLower(*in.Subcategory))
 		in.Subcategory = &trimmed
 	}
-	in.PricingModel = strings.TrimSpace(strings.ToLower(in.PricingModel))
+	in.PricingModel = strings.ReplaceAll(strings.TrimSpace(strings.ToLower(in.PricingModel)), "-", "_")
 	switch in.PricingModel {
-	case "fixed", "hourly", "quote":
+	case "fixed", "hourly", "per_project":
 	default:
 		in.PricingModel = "fixed"
 	}
@@ -134,9 +185,9 @@ func sanitizeListingInput(in ListingInput) ListingInput {
 	}
 	in.Status = strings.TrimSpace(strings.ToLower(in.Status))
 	switch in.Status {
-	case "draft", "active", "archived":
+	case "pending", "active", "inactive":
 	default:
-		in.Status = "draft"
+		in.Status = "pending"
 	}
 	if in.BasePriceCents < 0 {
 		in.BasePriceCents = 0
@@ -147,9 +198,42 @@ func sanitizeListingInput(in ListingInput) ListingInput {
 	return in
 }
 
+var listingDescriptionPolicy = newListingDescriptionPolicy()
+
+func newListingDescriptionPolicy() *bluemonday.Policy {
+	policy := bluemonday.StrictPolicy()
+	policy.AllowElements("p", "br", "ul", "ol", "li", "strong", "em", "b", "i", "u", "blockquote", "a", "h2", "h3")
+	policy.AllowAttrs("href", "target", "rel").OnElements("a")
+	policy.AllowURLSchemes("http", "https", "mailto", "tel")
+	policy.AllowRelativeURLs(true)
+	policy.RequireNoFollowOnLinks(true)
+	policy.AddTargetBlankToFullyQualifiedLinks(true)
+	return policy
+}
+
+func sanitizeListingDescription(raw string) string {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return ""
+	}
+	sanitized := listingDescriptionPolicy.Sanitize(trimmed)
+	sanitized = strings.ReplaceAll(sanitized, "<div>", "<p>")
+	sanitized = strings.ReplaceAll(sanitized, "</div>", "</p>")
+	sanitized = strings.TrimSpace(strings.ReplaceAll(sanitized, "&nbsp;", " "))
+	if sanitized == "" {
+		return ""
+	}
+	return sanitized
+}
+
 func (s *Store) CreateListing(ctx context.Context, userUUID string, input ListingInput) (Listing, error) {
 	input = sanitizeListingInput(input)
 	now := time.Now().UTC()
+	published := sql.NullTime{}
+	if input.Status == "active" {
+		published.Time = now
+		published.Valid = true
+	}
 	category, subcategory, attributes, err := s.validateCategory(ctx, input.Category, input.Subcategory, input.Attributes)
 	if err != nil {
 		return Listing{}, err
@@ -159,10 +243,11 @@ func (s *Store) CreateListing(ctx context.Context, userUUID string, input Listin
 		return Listing{}, err
 	}
 	row := s.db.QueryRowContext(ctx, `
-		INSERT INTO service_listings (user_uuid, title, summary, description, category, subcategory, pricing_model, base_price_cents, currency, status, attributes, created_at, updated_at)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$12)
-		RETURNING id, user_uuid, title, summary, description, category, subcategory, pricing_model, base_price_cents, currency, status, attributes, created_at, updated_at
-	`, userUUID, input.Title, nullable(input.Summary), nullable(input.Description), category, nullable(subcategory), input.PricingModel, input.BasePriceCents, input.Currency, input.Status, attrsJSON, now)
+		INSERT INTO service_listings (user_uuid, title, summary, description, category, subcategory, pricing_model, base_price_cents, currency, status, published_at, attributes, created_at, updated_at)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$13)
+		RETURNING id, user_uuid, title, summary, description, category, subcategory, pricing_model,
+		          base_price_cents, currency, status, preview_token, published_at, attributes, created_at, updated_at
+	`, userUUID, input.Title, nullable(input.Summary), nullable(input.Description), category, nullable(subcategory), input.PricingModel, input.BasePriceCents, input.Currency, input.Status, published, attrsJSON, now)
 	return scanListing(row)
 }
 
@@ -172,6 +257,29 @@ func (s *Store) UpdateListing(ctx context.Context, userUUID, listingID string, i
 	}
 	input = sanitizeListingInput(input)
 	now := time.Now().UTC()
+	var (
+		currentStatus    string
+		currentPublished sql.NullTime
+	)
+	if err := s.db.QueryRowContext(ctx, `
+		SELECT status, published_at
+		FROM service_listings
+		WHERE id=$1 AND user_uuid=$2
+	`, listingID, userUUID).Scan(&currentStatus, &currentPublished); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return Listing{}, ErrListingNotFound
+		}
+		return Listing{}, err
+	}
+	published := sql.NullTime{}
+	if input.Status == "active" {
+		if currentStatus == "active" && currentPublished.Valid {
+			published = currentPublished
+		} else {
+			published.Time = now
+			published.Valid = true
+		}
+	}
 	category, subcategory, attributes, err := s.validateCategory(ctx, input.Category, input.Subcategory, input.Attributes)
 	if err != nil {
 		return Listing{}, err
@@ -183,10 +291,11 @@ func (s *Store) UpdateListing(ctx context.Context, userUUID, listingID string, i
 	row := s.db.QueryRowContext(ctx, `
 		UPDATE service_listings
 		SET title=$1, summary=$2, description=$3, category=$4, subcategory=$5, pricing_model=$6,
-		    base_price_cents=$7, currency=$8, status=$9, attributes=$10, updated_at=$11
-		WHERE id=$12 AND user_uuid=$13
-		RETURNING id, user_uuid, title, summary, description, category, subcategory, pricing_model, base_price_cents, currency, status, attributes, created_at, updated_at
-	`, input.Title, nullable(input.Summary), nullable(input.Description), category, nullable(subcategory), input.PricingModel, input.BasePriceCents, input.Currency, input.Status, attrsJSON, now, listingID, userUUID)
+		    base_price_cents=$7, currency=$8, status=$9, published_at=$10, attributes=$11, updated_at=$12
+		WHERE id=$13 AND user_uuid=$14
+		RETURNING id, user_uuid, title, summary, description, category, subcategory, pricing_model,
+		          base_price_cents, currency, status, preview_token, published_at, attributes, created_at, updated_at
+	`, input.Title, nullable(input.Summary), nullable(input.Description), category, nullable(subcategory), input.PricingModel, input.BasePriceCents, input.Currency, input.Status, published, attrsJSON, now, listingID, userUUID)
 	return scanListing(row)
 }
 
@@ -206,7 +315,8 @@ func (s *Store) DeleteListing(ctx context.Context, userUUID, listingID string) e
 
 func (s *Store) ListListingsByUser(ctx context.Context, userUUID string) ([]Listing, error) {
 	rows, err := s.db.QueryxContext(ctx, `
-		SELECT id, user_uuid, title, summary, description, category, subcategory, pricing_model, base_price_cents, currency, status, attributes, created_at, updated_at
+		SELECT id, user_uuid, title, summary, description, category, subcategory, pricing_model,
+		       base_price_cents, currency, status, preview_token, published_at, attributes, created_at, updated_at
 		FROM service_listings
 		WHERE user_uuid=$1
 		ORDER BY created_at DESC
@@ -224,7 +334,7 @@ func (s *Store) ListListingsByUser(ctx context.Context, userUUID string) ([]List
 		}
 		listings = append(listings, lst)
 	}
-	return listings, nil
+	return s.attachMedia(ctx, listings)
 }
 
 func (s *Store) ListPublicListings(ctx context.Context, limit int) ([]Listing, error) {
@@ -232,7 +342,8 @@ func (s *Store) ListPublicListings(ctx context.Context, limit int) ([]Listing, e
 		limit = 20
 	}
 	rows, err := s.db.QueryxContext(ctx, `
-		SELECT id, user_uuid, title, summary, description, category, subcategory, pricing_model, base_price_cents, currency, status, attributes, created_at, updated_at
+		SELECT id, user_uuid, title, summary, description, category, subcategory, pricing_model,
+		       base_price_cents, currency, status, preview_token, published_at, attributes, created_at, updated_at
 		FROM service_listings
 		WHERE status='active'
 		ORDER BY updated_at DESC
@@ -251,7 +362,7 @@ func (s *Store) ListPublicListings(ctx context.Context, limit int) ([]Listing, e
 		}
 		listings = append(listings, lst)
 	}
-	return listings, nil
+	return s.attachMedia(ctx, listings)
 }
 
 // SearchPublicListings returns listings that satisfy the provided discovery filters.
@@ -304,7 +415,7 @@ func (s *Store) SearchPublicListings(ctx context.Context, filters SearchFilters)
 	baseQuery.WriteString(fmt.Sprintf(`
 		SELECT
 			l.id, l.user_uuid, l.title, l.summary, l.description, l.category, l.subcategory,
-			l.pricing_model, l.base_price_cents, l.currency, l.status, l.attributes,
+			l.pricing_model, l.base_price_cents, l.currency, l.status, l.preview_token, l.published_at, l.attributes,
 			l.created_at, l.updated_at,
 			COALESCE(r.avg_rating, 0) AS average_rating,
 			COALESCE(r.review_count, 0) AS review_count,
@@ -434,6 +545,8 @@ func (s *Store) SearchPublicListings(ctx context.Context, filters SearchFilters)
 			basePriceCents int64
 			currency       string
 			status         string
+			previewToken   string
+			publishedAt    sql.NullTime
 			attributesJSON []byte
 			createdAt      time.Time
 			updatedAt      time.Time
@@ -453,7 +566,7 @@ func (s *Store) SearchPublicListings(ctx context.Context, filters SearchFilters)
 		)
 		if err := rows.Scan(
 			&listingID, &userUUID, &title, &summary, &description, &category, &subcategory,
-			&pricingModel, &basePriceCents, &currency, &status, &attributesJSON, &createdAt, &updatedAt,
+			&pricingModel, &basePriceCents, &currency, &status, &previewToken, &publishedAt, &attributesJSON, &createdAt, &updatedAt,
 			&avgRating, &reviewCount, &totalResponses, &jobsCompleted, &avgRespMinutes,
 			&displayName, &profileType, &location,
 			&areaRegion, &areaCountry, &areaLat, &areaLng, &distanceKm,
@@ -472,9 +585,13 @@ func (s *Store) SearchPublicListings(ctx context.Context, filters SearchFilters)
 			BasePriceCents: basePriceCents,
 			Currency:       currency,
 			Status:         status,
+			PreviewToken:   previewToken,
+			PublishedAt:    nullableTimePtr(publishedAt),
 			CreatedAt:      createdAt,
 			UpdatedAt:      updatedAt,
 			Attributes:     map[string]any{},
+			Media:          []MediaAsset{},
+			Metrics:        ListingMetrics{},
 		}
 		if len(attributesJSON) > 0 {
 			var attrs map[string]any
@@ -791,11 +908,13 @@ func scanListing(row interface {
 		basePriceCents int64
 		currency       string
 		status         string
+		previewToken   string
+		publishedAt    sql.NullTime
 		attributesJSON []byte
 		createdAt      time.Time
 		updatedAt      time.Time
 	)
-	if err := row.Scan(&id, &userUUID, &title, &summary, &description, &category, &subcategory, &pricingModel, &basePriceCents, &currency, &status, &attributesJSON, &createdAt, &updatedAt); err != nil {
+	if err := row.Scan(&id, &userUUID, &title, &summary, &description, &category, &subcategory, &pricingModel, &basePriceCents, &currency, &status, &previewToken, &publishedAt, &attributesJSON, &createdAt, &updatedAt); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return Listing{}, ErrListingNotFound
 		}
@@ -820,6 +939,10 @@ func scanListing(row interface {
 		Currency:       currency,
 		Status:         status,
 		Attributes:     attrs,
+		PreviewToken:   previewToken,
+		PublishedAt:    nullableTimePtr(publishedAt),
+		Media:          []MediaAsset{},
+		Metrics:        ListingMetrics{},
 		CreatedAt:      createdAt,
 		UpdatedAt:      updatedAt,
 	}, nil
@@ -834,6 +957,14 @@ func nullableStringPtr(value sql.NullString) *string {
 		return nil
 	}
 	return &trimmed
+}
+
+func nullableTimePtr(value sql.NullTime) *time.Time {
+	if !value.Valid {
+		return nil
+	}
+	t := value.Time
+	return &t
 }
 
 func appendStringList(args *[]any, values []string) string {

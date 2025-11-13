@@ -1,0 +1,93 @@
+<section class="preview-page" *ngIf="!loading; else loadingTpl">
+  <ng-container *ngIf="preview; else errorTpl">
+    <header class="hero" [class.hero--has-image]="heroImage()">
+      <div class="hero__image" *ngIf="heroImage() as hero">
+        <img [src]="hero.previewUrl || hero.url" [alt]="preview.listing.title" />
+      </div>
+      <div class="hero__overlay"></div>
+      <div class="hero__content">
+        <p class="hero__eyebrow">{{ preview.profileType | titlecase }}</p>
+        <h1>{{ preview.listing.title }}</h1>
+        <p class="hero__summary" *ngIf="preview.listing.summary">{{ preview.listing.summary }}</p>
+        <div class="hero__meta">
+          <span>{{ preview.displayName || 'Verified Provider' }}</span>
+          <span>•</span>
+          <span>{{ preview.listing.category | titlecase }}</span>
+          <span *ngIf="preview.listing.subcategory"> · {{ preview.listing.subcategory | titlecase }}</span>
+        </div>
+        <div class="hero__stats">
+          <span *ngIf="preview.reviewCount">
+            ⭐ {{ preview.averageRating | number: '1.1-1' }} ({{ preview.reviewCount }} reviews)
+          </span>
+          <span>Pricing: {{ formatPricingModel(preview.listing.pricingModel) }}</span>
+        </div>
+        <div class="hero__actions">
+          <a
+            class="hero__cta"
+            [routerLink]="['/profiles', preview.listing.userUuid]"
+            (click)="recordContact()"
+          >
+            Contact Provider
+          </a>
+        </div>
+      </div>
+    </header>
+
+    <main class="preview__content">
+      <section class="card">
+        <h2>Overview</h2>
+        <div class="description" [innerHTML]="descriptionHtml"></div>
+        <div class="pricing">
+          <h3>Pricing</h3>
+          <p>
+            {{ formatPricingModel(preview.listing.pricingModel) }}
+            <ng-container *ngIf="preview.listing.basePriceCents > 0">
+              ·
+              {{
+                preview.listing.basePriceCents / 100
+                  | currency: preview.listing.currency : 'symbol-narrow'
+              }}
+            </ng-container>
+          </p>
+        </div>
+      </section>
+
+      <section class="card" *ngIf="heroImage() || galleryImages().length">
+        <h2>Gallery</h2>
+        <div class="gallery">
+          <figure class="gallery__hero" *ngIf="heroImage() as hero">
+            <img [src]="hero.previewUrl || hero.url" [alt]="hero.title || preview.listing.title" />
+            <figcaption>{{ hero.title || preview.listing.title }}</figcaption>
+          </figure>
+          <div class="gallery__grid" *ngIf="galleryImages().length">
+            <figure *ngFor="let image of galleryImages()">
+              <img [src]="image.previewUrl || image.url" [alt]="image.title || preview.listing.title" loading="lazy" />
+            </figure>
+          </div>
+        </div>
+      </section>
+
+      <section class="card" *ngIf="documents().length">
+        <h2>Documents</h2>
+        <ul class="documents">
+          <li *ngFor="let doc of documents()">
+            <a [href]="doc.url" target="_blank" rel="noopener">
+              {{ doc.title || doc.fileName || doc.mediaType | titlecase }}
+            </a>
+            <span class="documents__meta">
+              {{ doc.mimeType || doc.mediaType }} · {{ (doc.fileSizeBytes / 1024) | number: '1.0-0' }} KB
+            </span>
+          </li>
+        </ul>
+      </section>
+    </main>
+  </ng-container>
+</section>
+
+<ng-template #loadingTpl>
+  <div class="state state--loading">Loading preview…</div>
+</ng-template>
+
+<ng-template #errorTpl>
+  <div class="state state--error">{{ error }}</div>
+</ng-template>

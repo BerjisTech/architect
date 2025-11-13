@@ -27,6 +27,7 @@ type Options struct {
 	CoreAPIBase    string
 	CoreAPIClient  *coreapi.Client
 	Logger         *slog.Logger
+	MediaUploadDir string
 }
 
 func New(opts Options) *fiber.App {
@@ -41,6 +42,10 @@ func New(opts Options) *fiber.App {
 		AllowHeaders:     "Authorization,Content-Type,Accept,X-User-UUID,X-User-Roles",
 		AllowCredentials: true,
 	}))
+
+	if dir := strings.TrimSpace(opts.MediaUploadDir); dir != "" {
+		app.Static("/svc/media", dir)
+	}
 
 	app.Get("/v1/health", func(c *fiber.Ctx) error {
 		return c.JSON(fiber.Map{"success": true, "message": "ok"})
@@ -82,7 +87,7 @@ func New(opts Options) *fiber.App {
 		registerProfileRoutes(public, protected, profileStore, db)
 
 		providerStore := providers.NewStore(db)
-		registerProviderRoutes(public, protected, providerStore, db, opts.CoreAPIClient, logger)
+		registerProviderRoutes(public, protected, providerStore, db, opts.CoreAPIClient, logger, opts.MediaUploadDir)
 	}
 
 	// Floorplans CRUD

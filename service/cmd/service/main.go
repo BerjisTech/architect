@@ -30,6 +30,12 @@ func main() {
 	defer stop()
 
 	migrationsDir := resolveMigrationsDir(cfg.MigrationsDir)
+	mediaDir := resolveUploadDir(cfg.MediaUploadDir)
+	if err := os.MkdirAll(mediaDir, 0o755); err != nil {
+		logger.Error("failed to prepare media upload directory", "dir", mediaDir, "error", err)
+	} else {
+		logger.Info("media upload directory ready", "dir", mediaDir)
+	}
 	pool, err := db.ConnectPool(cfg.DatabaseURL, cfg.DatabaseReadURLs)
 	if err != nil {
 		logger.Error("database connection failed", "error", err)
@@ -74,10 +80,11 @@ func main() {
 			}
 			return pool.Reader()
 		},
-		Env:           cfg.Env,
-		CoreAPIBase:   cfg.CoreAPIBase,
-		CoreAPIClient: coreAPIClient,
-		Logger:        logger,
+		Env:            cfg.Env,
+		CoreAPIBase:    cfg.CoreAPIBase,
+		CoreAPIClient:  coreAPIClient,
+		Logger:         logger,
+		MediaUploadDir: mediaDir,
 	})
 	addr := ":" + cfg.Port
 	logger.Info("starting service", "app", cfg.AppName, "addr", addr, "env", cfg.Env)
@@ -130,6 +137,27 @@ func resolveMigrationsDir(dir string) string {
 	for _, candidate := range candidates {
 		if info, err := os.Stat(candidate); err == nil && info.IsDir() {
 			return candidate
+		}
+	}
+	return dir
+}
+
+func resolveUploadDir(dir string) string {
+	if trimmed := strings.TrimSpace(dir); trimmed != "" {
+		dir = trimmed
+	} else {
+		dir = "uploads"
+	}
+	candidates := []string{dir}
+	if filepath.IsAbs(dir) {
+		candidates = []string{dir}
+	} else if wd, err := os.Getwd(); err == nil {
+		candidates = append(candidates, filepath.Join(wd, dir))
+		candidates = append(candidates, filepath.Join(wd, "architect", "service", dir))
+	}
+	for _, candidate := range candidates {
+		if abs, err := filepath.Abs(candidate); err == nil {
+			return abs
 		}
 	}
 	return dir

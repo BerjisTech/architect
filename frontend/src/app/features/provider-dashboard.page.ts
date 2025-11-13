@@ -4,17 +4,19 @@ import { Component, OnInit, inject } from '@angular/core';
 import { FormBuilder, FormControl, FormGroup, ReactiveFormsModule, Validators } from '@angular/forms';
 import { firstValueFrom } from 'rxjs';
 import { ProviderApiService, ListingRequest, ServiceAreaRequest, AvailabilitySlotRequest } from '../core/services/provider-api.service';
-import { Listing, AvailabilitySlot, ServiceArea, Analytics } from '../models/providers';
+import { Listing, AvailabilitySlot, ServiceArea, Analytics, ListingMedia } from '../models/providers';
 import { ServiceCategory, ServiceSubcategory, CategoryAttribute } from '../models/categories';
+import { RichTextEditorComponent } from '../shared/components/rich-text-editor/rich-text-editor.component';
 
-const PRICING_MODELS = ['fixed', 'hourly', 'quote'];
-const STATUSES = ['draft', 'active', 'archived'];
+const PRICING_MODELS = ['fixed', 'hourly', 'per_project'];
+const STATUSES = ['pending', 'active', 'inactive'];
 
 @Component({
   selector: 'app-provider-dashboard-page',
   standalone: true,
-  imports: [CommonModule, ReactiveFormsModule],
-  templateUrl: './provider-dashboard.page.html'
+  imports: [CommonModule, ReactiveFormsModule, RichTextEditorComponent],
+  templateUrl: './provider-dashboard.page.html',
+  styleUrls: ['./provider-dashboard.page.css']
 })
 export class ProviderDashboardPage implements OnInit {
   private readonly api = inject(ProviderApiService);
@@ -35,6 +37,8 @@ export class ProviderDashboardPage implements OnInit {
   recording = false;
   error: string | null = null;
   providerAccessBlocked = false;
+  uploadingMedia = false;
+  mediaError: string | null = null;
 
   readonly dayOptions = [0, 1, 2, 3, 4, 5, 6];
   readonly dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
@@ -50,7 +54,7 @@ export class ProviderDashboardPage implements OnInit {
     pricingModel: ['fixed', Validators.required],
     basePrice: [0, [Validators.required, Validators.min(0)]],
     currency: ['USD', [Validators.required, Validators.minLength(3)]],
-    status: ['draft', Validators.required]
+    status: ['pending', Validators.required]
   });
 
   availabilityForm = this.fb.group({
@@ -125,10 +129,7 @@ export class ProviderDashboardPage implements OnInit {
       this.error = null;
       const response = await firstValueFrom(this.api.listMyListings());
       this.providerAccessBlocked = false;
-      this.listings = (response.data.listings ?? []).map(listing => ({
-        ...listing,
-        attributes: listing.attributes ?? {}
-      }));
+      this.listings = (response.data.listings ?? []).map(listing => this.enhanceListing(listing));
       if (this.listings.length > 0) {
         this.selectListing(this.listings[0]);
       } else {
@@ -152,6 +153,8 @@ export class ProviderDashboardPage implements OnInit {
   }
 
   selectListing(listing: Listing | null): void {
+    this.mediaError = null;
+    this.uploadingMedia = false;
     this.selectedListing = listing;
     if (!listing) {
       this.listingForm.reset(
@@ -161,44 +164,48 @@ export class ProviderDashboardPage implements OnInit {
           summary: '',
           description: '',
           category: this.categories[0]?.key ?? '',
-          subcategory: '',
-          pricingModel: 'fixed',
-          basePrice: 0,
-          currency: 'USD',
-          status: 'draft'
-        },
-        { emitEvent: false }
-      );
+        subcategory: '',
+        pricingModel: 'fixed',
+        basePrice: 0,
+        currency: 'USD',
+        status: 'pending'
+      },
+      { emitEvent: false }
+    );
       const categoryKey = (this.listingForm.value.category as string) ?? '';
       this.onCategoryChanged(categoryKey, {});
       this.availability = [];
       this.serviceAreas = [];
       return;
     }
+    const enriched = this.enhanceListing(listing);
+    this.selectedListing = enriched;
     this.listingForm.reset(
       {
-        id: listing.id,
-        title: listing.title,
-        summary: listing.summary ?? '',
-        description: listing.description ?? '',
-        category: listing.category ?? '',
-        subcategory: listing.subcategory ?? '',
-        pricingModel: listing.pricingModel ?? 'fixed',
-        basePrice: listing.basePriceCents / 100,
-        currency: listing.currency ?? 'USD',
-        status: listing.status ?? 'draft'
+        id: enriched.id,
+        title: enriched.title,
+        summary: enriched.summary ?? '',
+        description: enriched.description ?? '',
+        category: enriched.category ?? '',
+        subcategory: enriched.subcategory ?? '',
+        pricingModel: enriched.pricingModel ?? 'fixed',
+        basePrice: enriched.basePriceCents / 100,
+        currency: enriched.currency ?? 'USD',
+        status: enriched.status ?? 'pending'
       },
       { emitEvent: false }
     );
-    this.onCategoryChanged(listing.category ?? '', listing.attributes ?? {});
+    this.onCategoryChanged(enriched.category ?? '', enriched.attributes ?? {});
     if (
-      listing.subcategory &&
-      !this.subcategoryOptions.some(option => option.key === listing.subcategory)
+      enriched.subcategory &&
+      !this.subcategoryOptions.some(option => option.key === enriched.subcategory)
     ) {
       this.listingForm.patchValue({ subcategory: '' }, { emitEvent: false });
     }
-    this.loadAvailability(listing.id);
-    this.loadServiceAreas(listing.id);
+    this.availability = [];
+    this.serviceAreas = [];
+    this.loadAvailability(enriched.id);
+    this.loadServiceAreas(enriched.id);
   }
 
   async saveListing(): Promise<void> {
@@ -225,7 +232,7 @@ export class ProviderDashboardPage implements OnInit {
         pricingModel: value.pricingModel ?? 'fixed',
         basePriceCents: Math.round((value.basePrice ?? 0) * 100),
         currency: (value.currency ?? 'USD').toUpperCase(),
-        status: value.status ?? 'draft'
+        status: value.status ?? 'pending'
       };
       const subcategory = emptyToNull(value.subcategory);
       if (subcategory !== undefined) {
@@ -390,6 +397,219 @@ export class ProviderDashboardPage implements OnInit {
       this.attributeForm.addControl(attribute.key, control);
     }
     return control;
+  }
+
+  formatPricingModel(model: string | null | undefined): string {
+    const value = (model ?? 'fixed').replace(/-/g, '_');
+    return this.toTitleCase(value);
+  }
+
+  async handleMediaSelection(event: Event): Promise<void> {
+    if (!this.selectedListing) {
+      return;
+    }
+    const input = event.target as HTMLInputElement | null;
+    const files = input?.files ? Array.from(input.files) : [];
+    if (!files.length) {
+      return;
+    }
+    this.mediaError = null;
+    this.uploadingMedia = true;
+    try {
+      let working = this.selectedListing;
+      for (const file of files) {
+        const mediaType = this.resolveMediaType(file);
+        if (!mediaType) {
+          this.mediaError = `${file.name} is not a supported format.`;
+          continue;
+        }
+        const shouldBePrimary =
+          mediaType === 'image' && !working.media.some(item => item.mediaType === 'image');
+        const response = await firstValueFrom(
+          this.api.uploadListingMedia(working.id, file, {
+            mediaType,
+            isPrimary: shouldBePrimary
+          })
+        );
+        const media = response.data.media;
+        if (!media) {
+          continue;
+        }
+        working = this.integrateMedia(working, media);
+        this.selectedListing = working;
+        this.updateListingCollection(working);
+      }
+    } catch (error) {
+      console.error('Failed to upload media', error);
+      this.mediaError = 'Unable to upload media at this time.';
+    } finally {
+      this.uploadingMedia = false;
+      if (input) {
+        input.value = '';
+      }
+    }
+  }
+
+  async deleteMedia(media: ListingMedia): Promise<void> {
+    if (!this.selectedListing) {
+      return;
+    }
+    this.mediaError = null;
+    try {
+      await firstValueFrom(this.api.deleteListingMedia(this.selectedListing.id, media.id));
+      const remaining = this.selectedListing.media.filter(item => item.id !== media.id);
+      const updated = { ...this.selectedListing, media: this.sortMedia(remaining) };
+      this.selectedListing = updated;
+      this.updateListingCollection(updated);
+    } catch (error) {
+      console.error('Failed to delete media', error);
+      this.mediaError = 'Failed to delete media.';
+    }
+  }
+
+  async setPrimaryMedia(media: ListingMedia): Promise<void> {
+    if (!this.selectedListing) {
+      return;
+    }
+    this.mediaError = null;
+    try {
+      const response = await firstValueFrom(
+        this.api.setPrimaryListingMedia(this.selectedListing.id, media.id)
+      );
+      const updated = this.integrateMediaList(this.selectedListing, response.data.media ?? []);
+      this.selectedListing = updated;
+      this.updateListingCollection(updated);
+    } catch (error) {
+      console.error('Failed to set primary media', error);
+      this.mediaError = 'Failed to update primary image.';
+    }
+  }
+
+  openPreview(): void {
+    if (!this.selectedListing?.previewToken) {
+      return;
+    }
+    const token = this.selectedListing.previewToken;
+    window.open(`/preview/listings/${token}`, '_blank', 'noopener');
+  }
+
+  formatFileSize(bytes: number): string {
+    if (!Number.isFinite(bytes) || bytes <= 0) {
+      return '0 B';
+    }
+    const units = ['B', 'KB', 'MB', 'GB'];
+    let value = bytes;
+    let index = 0;
+    while (value >= 1024 && index < units.length - 1) {
+      value /= 1024;
+      index += 1;
+    }
+    const precision = index === 0 ? 0 : 1;
+    return `${value.toFixed(precision)} ${units[index]}`;
+  }
+
+  mediaLabel(media: ListingMedia): string {
+    if (media.title) {
+      return media.title;
+    }
+    const original = typeof media.metadata?.['originalFileName'] === 'string'
+      ? (media.metadata['originalFileName'] as string)
+      : media.fileName ?? '';
+    return original || `${media.mediaType}`;
+  }
+
+  mediaPreviewUrl(media: ListingMedia): string {
+    return (media.previewUrl ?? media.url) as string;
+  }
+
+  private resolveMediaType(file: File): 'image' | 'document' | null {
+    const type = (file.type || '').toLowerCase();
+    if (type.startsWith('image/')) {
+      return 'image';
+    }
+    const documentMimes = [
+      'application/pdf',
+      'application/msword',
+      'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      'application/vnd.ms-powerpoint',
+      'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+      'application/vnd.ms-excel',
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      'text/plain'
+    ];
+    if (documentMimes.includes(type)) {
+      return 'document';
+    }
+    const ext = file.name.split('.').pop()?.toLowerCase() ?? '';
+    if (['jpg', 'jpeg', 'png', 'webp'].includes(ext)) {
+      return 'image';
+    }
+    if (['pdf', 'doc', 'docx', 'ppt', 'pptx', 'xls', 'xlsx', 'txt'].includes(ext)) {
+      return 'document';
+    }
+    return null;
+  }
+
+  private enhanceListing(listing: Listing): Listing {
+    const media = this.sortMedia(listing.media ?? []);
+    const metrics = listing.metrics ?? {
+      viewCount: 0,
+      contactCount: 0,
+      lastViewedAt: null,
+      lastContactAt: null
+    };
+    return {
+      ...listing,
+      attributes: listing.attributes ?? {},
+      media,
+      metrics: {
+        viewCount: metrics.viewCount ?? 0,
+        contactCount: metrics.contactCount ?? 0,
+        lastViewedAt: metrics.lastViewedAt ?? null,
+        lastContactAt: metrics.lastContactAt ?? null
+      }
+    };
+  }
+
+  private sortMedia(assets: ListingMedia[]): ListingMedia[] {
+    return [...assets].sort((a, b) => {
+      if (a.mediaType !== b.mediaType) {
+        if (a.mediaType === 'image') {
+          return -1;
+        }
+        if (b.mediaType === 'image') {
+          return 1;
+        }
+      }
+      if (a.isPrimary !== b.isPrimary) {
+        return a.isPrimary ? -1 : 1;
+      }
+      if (a.position !== b.position) {
+        return a.position - b.position;
+      }
+      return new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
+    });
+  }
+
+  private integrateMedia(listing: Listing, media: ListingMedia): Listing {
+    const existing = listing.media ?? [];
+    const filtered = existing
+      .filter(item => item.id !== media.id)
+      .map(item =>
+        media.mediaType === 'image' && media.isPrimary && item.mediaType === 'image'
+          ? { ...item, isPrimary: false }
+          : item
+      );
+    const updated = [...filtered, media];
+    return { ...listing, media: this.sortMedia(updated) };
+  }
+
+  private integrateMediaList(listing: Listing, mediaList: ListingMedia[]): Listing {
+    return { ...listing, media: this.sortMedia(mediaList ?? []) };
+  }
+
+  private updateListingCollection(updated: Listing): void {
+    this.listings = this.listings.map(item => (item.id === updated.id ? updated : item));
   }
 
   private toTitleCase(value: string): string {

@@ -62,6 +62,11 @@ export const appRoutes: Routes = [
     title: 'Profile'
   },
   {
+    path: 'preview/listings/:token',
+    loadComponent: () => import('./features/listing-preview.page').then(m => m.ListingPreviewPage),
+    title: 'Listing Preview'
+  },
+  {
     path: 'studio',
     canActivate: [ensureAuthGuard],
     loadComponent: () => import('./features/design-studio.page').then(m => m.DesignStudioPage),

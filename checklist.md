@@ -154,14 +154,14 @@ Build a comprehensive real estate and construction platform at architect.berjis.
 - [x] Create "recommended for you" section
 
 ### 4.3 Service Listings
-- [ ] Design service listing data model
-- [ ] Create listing creation API and UI
-- [ ] Implement rich text editor for descriptions
-- [ ] Add image/document upload functionality
-- [ ] Create listing preview functionality
-- [ ] Implement listing status management (active/inactive/pending)
-- [ ] Add pricing models (fixed, hourly, per-project)
-- [ ] Create listing analytics (views, contacts)
+- [x] Design service listing data model
+- [x] Create listing creation API and UI
+- [x] Implement rich text editor for descriptions
+- [x] Add image/document upload functionality
+- [x] Create listing preview functionality
+- [x] Implement listing status management (active/inactive/pending)
+- [x] Add pricing models (fixed, hourly, per-project)
+- [x] Create listing analytics (views, contacts)
 
 ### 4.4 Request/Quote System
 - [ ] Create request-for-quote (RFQ) functionality

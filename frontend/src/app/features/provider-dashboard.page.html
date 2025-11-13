@@ -63,10 +63,9 @@
             <strong>{{ listing.title }}</strong>
             <p class="meta">
               {{ categoryLabel(listing) }}
-              <ng-container *ngIf="listing.subcategory">
-                • {{ subcategoryLabel(listing) }}
+              <ng-container *ngIf="listing.subcategory">                &bull; {{ subcategoryLabel(listing) }}
               </ng-container>
-              | {{ listing.pricingModel | titlecase }} | {{ listing.status | titlecase }}
+              | {{ formatPricingModel(listing.pricingModel) }} | {{ listing.status | titlecase }}
             </p>
           </div>
           <div class="actions">
@@ -79,7 +78,17 @@
     </section>
 
     <section class="card">
-      <h2>{{ listingForm.value.id ? 'Edit Listing' : 'Create Listing' }}</h2>
+      <div class="section-header">
+        <h2>{{ listingForm.value.id ? 'Edit Listing' : 'Create Listing' }}</h2>
+        <button
+          type="button"
+          class="secondary"
+          (click)="openPreview()"
+          *ngIf="selectedListing?.previewToken"
+        >
+          Preview
+        </button>
+      </div>
       <form [formGroup]="listingForm" (ngSubmit)="saveListing()">
         <div class="grid">
           <label>Title<input type="text" formControlName="title" /></label>
@@ -97,7 +106,7 @@
           </label>
           <label>Pricing Model
             <select formControlName="pricingModel">
-              <option *ngFor="let option of pricingModels" [value]="option">{{ option | titlecase }}</option>
+              <option *ngFor="let option of pricingModels" [value]="option">{{ formatPricingModel(option) }}</option>
             </select>
           </label>
           <label>Status
@@ -115,7 +124,11 @@
             <input type="text" formControlName="summary" />
           </label>
           <label class="span-2">Description
-            <textarea rows="4" formControlName="description"></textarea>
+            <app-rich-text-editor
+              formControlName="description"
+              placeholder="Share scope, deliverables, process, and what clients can expect."
+              ariaLabel="Service description"
+            ></app-rich-text-editor>
           </label>
           <div class="span-2 attribute-fields" *ngIf="attributeDefinitions.length">
             <h3>Category Attributes</h3>
@@ -156,6 +169,69 @@
           {{ saving ? 'Saving...' : (listingForm.value.id ? 'Update Listing' : 'Create Listing') }}
         </button>
       </form>
+    </section>
+
+    <section class="card" *ngIf="selectedListing">
+      <h2>Listing Insights</h2>
+      <div class="insights-grid">
+        <div>
+          <h3>Views</h3>
+          <p>{{ selectedListing.metrics.viewCount }}</p>
+          <small *ngIf="selectedListing.metrics.lastViewedAt">Last viewed {{ selectedListing.metrics.lastViewedAt | date:'medium' }}</small>
+        </div>
+        <div>
+          <h3>Contacts</h3>
+          <p>{{ selectedListing.metrics.contactCount }}</p>
+          <small *ngIf="selectedListing.metrics.lastContactAt">Last contact {{ selectedListing.metrics.lastContactAt | date:'medium' }}</small>
+        </div>
+      </div>
+    </section>
+
+    <section class="card" *ngIf="selectedListing">
+      <div class="section-header media-header">
+        <h2>Media Library</h2>
+        <label class="upload-button">
+          <input
+            type="file"
+            (change)="handleMediaSelection($event)"
+            [disabled]="uploadingMedia"
+            multiple
+            accept="image/png,image/jpeg,image/webp,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.ms-powerpoint,application/vnd.openxmlformats-officedocument.presentationml.presentation,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/plain"
+          />
+          <span>{{ uploadingMedia ? 'Uploading…' : 'Upload Files' }}</span>
+        </label>
+      </div>
+      <p class="helper-text">
+        Images (JPG, PNG, WEBP up to 10MB). Documents (PDF, DOCX, PPTX, XLSX up to 25MB).
+      </p>
+      <div class="alert alert--error" *ngIf="mediaError">{{ mediaError }}</div>
+      <ul class="media-grid">
+        <li *ngFor="let media of selectedListing.media" [class.primary]="media.mediaType === 'image' && media.isPrimary">
+          <div class="preview" *ngIf="media.mediaType === 'image'; else documentPreview">
+            <img [src]="mediaPreviewUrl(media)" [alt]="mediaLabel(media)" loading="lazy" />
+            <span class="badge" *ngIf="media.isPrimary">Cover</span>
+          </div>
+          <ng-template #documentPreview>
+            <div class="document-chip">
+              <span>{{ media.mimeType || media.mediaType | uppercase }}</span>
+            </div>
+          </ng-template>
+          <div class="details">
+            <h3>{{ mediaLabel(media) }}</h3>
+            <p class="details-meta">
+              {{ formatFileSize(media.fileSizeBytes) }} · {{ media.mediaType | titlecase }}
+            </p>
+            <p *ngIf="media.description">{{ media.description }}</p>
+          </div>
+          <div class="media-actions">
+            <button type="button" (click)="setPrimaryMedia(media)" *ngIf="media.mediaType === 'image' && !media.isPrimary">
+              Set Primary
+            </button>
+            <button type="button" class="danger" (click)="deleteMedia(media)">Remove</button>
+          </div>
+        </li>
+        <li *ngIf="!selectedListing.media.length" class="empty">No media uploaded yet.</li>
+      </ul>
     </section>
 
     <section class="card" *ngIf="selectedListing">
@@ -241,3 +317,5 @@
 <ng-template #loadingTpl>
   <p>Loading provider dashboard.</p>
 </ng-template>
+
+

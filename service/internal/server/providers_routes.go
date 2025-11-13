@@ -3,14 +3,19 @@ package server
 import (
 	"context"
 	"errors"
+	"fmt"
+	"io"
 	"log/slog"
 	"math"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/gofiber/fiber/v2"
+	"github.com/google/uuid"
 	"github.com/jmoiron/sqlx"
 
 	"github.com/berjistech/berjis-ecosystem/architect/service/internal/auth"
@@ -20,12 +25,52 @@ import (
 	"github.com/berjistech/berjis-ecosystem/architect/service/internal/users"
 )
 
+const (
+	maxImageUploadSize    = 10 * 1024 * 1024
+	maxDocumentUploadSize = 25 * 1024 * 1024
+)
+
+var (
+	imageMimeExtensions = map[string]string{
+		"image/jpeg": ".jpg",
+		"image/png":  ".png",
+		"image/webp": ".webp",
+	}
+	documentMimeExtensions = map[string]string{
+		"application/pdf":    ".pdf",
+		"application/msword": ".doc",
+		"application/vnd.openxmlformats-officedocument.wordprocessingml.document": ".docx",
+		"application/vnd.ms-excel": ".xls",
+		"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet":         ".xlsx",
+		"application/vnd.ms-powerpoint":                                             ".ppt",
+		"application/vnd.openxmlformats-officedocument.presentationml.presentation": ".pptx",
+		"text/plain": ".txt",
+	}
+	imageExtensionMime = map[string]string{
+		".jpg":  "image/jpeg",
+		".jpeg": "image/jpeg",
+		".png":  "image/png",
+		".webp": "image/webp",
+	}
+	documentExtensionMime = map[string]string{
+		".pdf":  "application/pdf",
+		".doc":  "application/msword",
+		".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+		".xls":  "application/vnd.ms-excel",
+		".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+		".ppt":  "application/vnd.ms-powerpoint",
+		".pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+		".txt":  "text/plain",
+	}
+)
+
 type providerHandler struct {
 	store      *providers.Store
 	db         *sqlx.DB
 	core       *coreapi.Client
 	log        *slog.Logger
 	categories *categories.Store
+	mediaDir   string
 }
 
 func registerProviderRoutes(
@@ -35,6 +80,7 @@ func registerProviderRoutes(
 	db *sqlx.DB,
 	coreClient *coreapi.Client,
 	logger *slog.Logger,
+	mediaDir string,
 ) {
 	catStore := store.Categories()
 	if catStore == nil && db != nil {
@@ -46,12 +92,16 @@ func registerProviderRoutes(
 		core:       coreClient,
 		log:        logger,
 		categories: catStore,
+		mediaDir:   strings.TrimSpace(mediaDir),
 	}
 
 	// Public endpoints
 	public.Get("/providers/search", h.searchProviders)
 	public.Get("/providers/categories", h.listCategories)
 	public.Get("/providers/listings", h.listPublicListings)
+	public.Get("/providers/listings/previews/:token", h.previewListing)
+	public.Post("/providers/listings/:id/view", h.recordListingView)
+	public.Post("/providers/listings/:id/contact", h.recordListingContact)
 
 	// Authenticated provider endpoints
 	protected.Get("/providers/me/listings", h.listMyListings)
@@ -66,6 +116,10 @@ func registerProviderRoutes(
 	protected.Post("/providers/categories", h.upsertCategory)
 	protected.Post("/providers/categories/:categoryKey/subcategories", h.upsertSubcategory)
 	protected.Post("/providers/categories/:categoryKey/attributes", h.upsertAttribute)
+	protected.Get("/providers/listings/:id/media", h.getListingMedia)
+	protected.Post("/providers/listings/:id/media", h.uploadListingMedia)
+	protected.Delete("/providers/listings/:id/media/:mediaId", h.deleteListingMedia)
+	protected.Post("/providers/listings/:id/media/:mediaId/primary", h.setPrimaryListingMedia)
 	protected.Get("/providers/favorites", h.listFavorites)
 	protected.Post("/providers/favorites/:listingId", h.addFavorite)
 	protected.Delete("/providers/favorites/:listingId", h.removeFavorite)
@@ -585,6 +639,280 @@ func (h providerHandler) deleteListing(c *fiber.Ctx) error {
 	return c.JSON(fiber.Map{"success": true})
 }
 
+func (h providerHandler) getListingMedia(c *fiber.Ctx) error {
+	status, err := h.requireApprovedProvider(c)
+	if err != nil {
+		return err
+	}
+	listingID := strings.TrimSpace(c.Params("id"))
+	if listingID == "" {
+		return badRequest(c, "invalid listing id")
+	}
+	assets, err := h.store.ListMedia(c.Context(), listingID, status.UserUUID)
+	if err != nil {
+		if errors.Is(err, providers.ErrListingNotFound) {
+			return notFound(c, "listing not found")
+		}
+		return serverError(c, err)
+	}
+	return c.JSON(fiber.Map{"success": true, "data": fiber.Map{"media": assets}})
+}
+
+func (h providerHandler) uploadListingMedia(c *fiber.Ctx) error {
+	status, err := h.requireApprovedProvider(c)
+	if err != nil {
+		return err
+	}
+	if strings.TrimSpace(h.mediaDir) == "" {
+		return c.Status(fiber.StatusServiceUnavailable).JSON(fiber.Map{
+			"success": false,
+			"message": "media uploads are not configured",
+		})
+	}
+	listingID := strings.TrimSpace(c.Params("id"))
+	if listingID == "" {
+		return badRequest(c, "invalid listing id")
+	}
+	if err := h.ensureListingOwner(c.Context(), status.UserUUID, listingID); err != nil {
+		if errors.Is(err, providers.ErrListingNotFound) {
+			return notFound(c, "listing not found")
+		}
+		return serverError(c, err)
+	}
+	fileHeader, err := c.FormFile("file")
+	if err != nil {
+		return badRequest(c, "file is required")
+	}
+	mediaType := strings.ToLower(strings.TrimSpace(c.FormValue("mediaType")))
+	if mediaType != "image" && mediaType != "document" {
+		return badRequest(c, "mediaType must be image or document")
+	}
+	if mediaType == "image" && fileHeader.Size > maxImageUploadSize {
+		return badRequest(c, fmt.Sprintf("images must be <= %dMB", maxImageUploadSize/1024/1024))
+	}
+	if mediaType == "document" && fileHeader.Size > maxDocumentUploadSize {
+		return badRequest(c, fmt.Sprintf("documents must be <= %dMB", maxDocumentUploadSize/1024/1024))
+	}
+	src, err := fileHeader.Open()
+	if err != nil {
+		return serverError(c, err)
+	}
+	defer src.Close()
+	data, err := io.ReadAll(src)
+	if err != nil {
+		return serverError(c, err)
+	}
+	if len(data) == 0 {
+		return badRequest(c, "file is empty")
+	}
+	detectedMime := http.DetectContentType(data[:min(len(data), 512)])
+	mimeType, extension, err := resolveMediaAttributes(mediaType, detectedMime, fileHeader.Filename)
+	if err != nil {
+		return badRequest(c, err.Error())
+	}
+	fileID := uuid.New().String()
+	fileName := fileID + extension
+	destDir := filepath.Join(h.mediaDir, "listings", listingID)
+	if err := os.MkdirAll(destDir, 0o755); err != nil {
+		return serverError(c, err)
+	}
+	destPath := filepath.Join(destDir, fileName)
+	if err := os.WriteFile(destPath, data, 0o644); err != nil {
+		return serverError(c, err)
+	}
+	urlPath := listingMediaURL(listingID, fileName)
+	title := strings.TrimSpace(c.FormValue("title"))
+	if title == "" {
+		title = deriveMediaTitle(fileHeader.Filename, extension)
+	}
+	var description *string
+	if desc := strings.TrimSpace(c.FormValue("description")); desc != "" {
+		description = &desc
+	}
+	isPrimary := strings.EqualFold(strings.TrimSpace(c.FormValue("isPrimary")), "true")
+	input := providers.MediaInput{
+		Title:       title,
+		Description: description,
+		MediaType:   mediaType,
+		URL:         urlPath,
+		FileName:    fileName,
+		MimeType:    mimeType,
+		FileSize:    int64(len(data)),
+		IsPrimary:   isPrimary,
+		Metadata: map[string]any{
+			"originalFileName": fileHeader.Filename,
+		},
+	}
+	if mediaType == "image" {
+		input.PreviewURL = &urlPath
+	}
+	asset, storeErr := h.store.AddMedia(c.Context(), listingID, status.UserUUID, input)
+	if storeErr != nil {
+		_ = os.Remove(destPath)
+		if errors.Is(storeErr, providers.ErrListingNotFound) {
+			return notFound(c, "listing not found")
+		}
+		if errors.Is(storeErr, providers.ErrMediaNotFound) {
+			return notFound(c, "media not found")
+		}
+		return serverError(c, storeErr)
+	}
+	return c.Status(http.StatusCreated).JSON(fiber.Map{"success": true, "data": fiber.Map{"media": asset}})
+}
+
+func (h providerHandler) deleteListingMedia(c *fiber.Ctx) error {
+	status, err := h.requireApprovedProvider(c)
+	if err != nil {
+		return err
+	}
+	listingID := strings.TrimSpace(c.Params("id"))
+	mediaID := strings.TrimSpace(c.Params("mediaId"))
+	if listingID == "" || mediaID == "" {
+		return badRequest(c, "invalid identifiers")
+	}
+	asset, storeErr := h.store.RemoveMedia(c.Context(), listingID, mediaID, status.UserUUID)
+	if storeErr != nil {
+		if errors.Is(storeErr, providers.ErrMediaNotFound) {
+			return notFound(c, "media not found")
+		}
+		if errors.Is(storeErr, providers.ErrListingNotFound) {
+			return notFound(c, "listing not found")
+		}
+		return serverError(c, storeErr)
+	}
+	if strings.TrimSpace(h.mediaDir) != "" && asset.FileName != nil {
+		path := filepath.Join(h.mediaDir, "listings", listingID, *asset.FileName)
+		if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
+			h.log.Warn("failed to remove media file", "path", path, "error", err)
+		}
+	}
+	return c.JSON(fiber.Map{"success": true, "data": fiber.Map{"removed": asset.ID}})
+}
+
+func (h providerHandler) setPrimaryListingMedia(c *fiber.Ctx) error {
+	status, err := h.requireApprovedProvider(c)
+	if err != nil {
+		return err
+	}
+	listingID := strings.TrimSpace(c.Params("id"))
+	mediaID := strings.TrimSpace(c.Params("mediaId"))
+	if listingID == "" || mediaID == "" {
+		return badRequest(c, "invalid identifiers")
+	}
+	assets, storeErr := h.store.SetPrimaryMedia(c.Context(), listingID, mediaID, status.UserUUID)
+	if storeErr != nil {
+		if errors.Is(storeErr, providers.ErrMediaNotFound) {
+			return notFound(c, "media not found")
+		}
+		if errors.Is(storeErr, providers.ErrListingNotFound) {
+			return notFound(c, "listing not found")
+		}
+		return serverError(c, storeErr)
+	}
+	return c.JSON(fiber.Map{"success": true, "data": fiber.Map{"media": assets}})
+}
+
+func (h providerHandler) previewListing(c *fiber.Ctx) error {
+	token := strings.TrimSpace(c.Params("token"))
+	if token == "" {
+		return badRequest(c, "invalid preview token")
+	}
+	preview, err := h.store.GetListingPreview(c.Context(), token)
+	if err != nil {
+		if errors.Is(err, providers.ErrListingNotFound) {
+			return notFound(c, "preview not found")
+		}
+		return serverError(c, err)
+	}
+	return c.JSON(fiber.Map{"success": true, "data": fiber.Map{"listing": preview}})
+}
+
+func (h providerHandler) recordListingView(c *fiber.Ctx) error {
+	listingID := strings.TrimSpace(c.Params("id"))
+	if listingID == "" {
+		return badRequest(c, "invalid listing id")
+	}
+	if err := h.store.RecordView(c.Context(), listingID); err != nil {
+		if errors.Is(err, providers.ErrListingNotFound) {
+			return notFound(c, "listing not found")
+		}
+		return serverError(c, err)
+	}
+	return c.JSON(fiber.Map{"success": true})
+}
+
+func (h providerHandler) recordListingContact(c *fiber.Ctx) error {
+	listingID := strings.TrimSpace(c.Params("id"))
+	if listingID == "" {
+		return badRequest(c, "invalid listing id")
+	}
+	if err := h.store.RecordContact(c.Context(), listingID); err != nil {
+		if errors.Is(err, providers.ErrListingNotFound) {
+			return notFound(c, "listing not found")
+		}
+		return serverError(c, err)
+	}
+	return c.JSON(fiber.Map{"success": true})
+}
+
+func resolveMediaAttributes(mediaType, detectedMime, originalName string) (string, string, error) {
+	detectedMime = strings.ToLower(strings.TrimSpace(detectedMime))
+	extension := strings.ToLower(strings.TrimSpace(filepath.Ext(originalName)))
+	if extension != "" && !strings.HasPrefix(extension, ".") {
+		extension = "." + extension
+	}
+	switch mediaType {
+	case "image":
+		if ext, ok := imageMimeExtensions[detectedMime]; ok {
+			return detectedMime, ext, nil
+		}
+		if canonical, ok := imageExtensionMime[extension]; ok {
+			return canonical, extension, nil
+		}
+	case "document":
+		if ext, ok := documentMimeExtensions[detectedMime]; ok {
+			return detectedMime, ext, nil
+		}
+		if canonical, ok := documentExtensionMime[extension]; ok {
+			return canonical, extension, nil
+		}
+		if detectedMime == "application/zip" {
+			if canonical, ok := documentExtensionMime[extension]; ok {
+				return canonical, extension, nil
+			}
+		}
+	}
+	return "", "", fmt.Errorf("unsupported %s format", mediaType)
+}
+
+func deriveMediaTitle(originalName, extension string) string {
+	name := originalName
+	lowerName := strings.ToLower(name)
+	lowerExt := strings.ToLower(extension)
+	if lowerExt != "" && strings.HasSuffix(lowerName, lowerExt) {
+		name = name[:len(name)-len(extension)]
+	}
+	name = strings.TrimSpace(strings.NewReplacer("_", " ", "-", " ").Replace(name))
+	if name == "" {
+		return "Attachment"
+	}
+	if len(name) > 140 {
+		name = name[:140]
+	}
+	return name
+}
+
+func listingMediaURL(listingID, fileName string) string {
+	return fmt.Sprintf("/svc/media/listings/%s/%s", listingID, fileName)
+}
+
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
+}
+
 func (h providerHandler) listPublicListings(c *fiber.Ctx) error {
 	limit := 50
 	if raw := strings.TrimSpace(c.Query("limit")); raw != "" {
@@ -820,14 +1148,16 @@ func (h providerHandler) isPrivileged(userUUID string) bool {
 // Request payload adapters -------------------------------------------------------
 
 type listingRequest struct {
-	Title          string  `json:"title"`
-	Summary        *string `json:"summary"`
-	Description    *string `json:"description"`
-	Category       string  `json:"category"`
-	PricingModel   string  `json:"pricingModel"`
-	BasePriceCents int64   `json:"basePriceCents"`
-	Currency       string  `json:"currency"`
-	Status         string  `json:"status"`
+	Title          string         `json:"title"`
+	Summary        *string        `json:"summary"`
+	Description    *string        `json:"description"`
+	Category       string         `json:"category"`
+	Subcategory    *string        `json:"subcategory"`
+	PricingModel   string         `json:"pricingModel"`
+	BasePriceCents int64          `json:"basePriceCents"`
+	Currency       string         `json:"currency"`
+	Status         string         `json:"status"`
+	Attributes     map[string]any `json:"attributes"`
 }
 
 func (r listingRequest) toInput() providers.ListingInput {
@@ -836,10 +1166,12 @@ func (r listingRequest) toInput() providers.ListingInput {
 		Summary:        r.Summary,
 		Description:    r.Description,
 		Category:       r.Category,
+		Subcategory:    r.Subcategory,
 		PricingModel:   r.PricingModel,
 		BasePriceCents: r.BasePriceCents,
 		Currency:       r.Currency,
 		Status:         r.Status,
+		Attributes:     r.Attributes,
 	}
 }
 

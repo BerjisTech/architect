@@ -1,0 +1,130 @@
+:host {
+  display: block;
+}
+
+.rte {
+  border: 1px solid #e2e8f0;
+  border-radius: 0.75rem;
+  background: #ffffff;
+  box-shadow: inset 0 1px 2px rgba(15, 23, 42, 0.04);
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+  display: flex;
+  flex-direction: column;
+}
+
+:host-context(.dark) .rte {
+  background: #0f172a;
+  border-color: #1e293b;
+  box-shadow: none;
+}
+
+.rte--focused {
+  border-color: #2563eb;
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.15);
+}
+
+.rte--disabled {
+  opacity: 0.6;
+}
+
+.rte__toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  padding: 0.5rem 0.75rem;
+  border-bottom: 1px solid #e2e8f0;
+}
+
+:host-context(.dark) .rte__toolbar {
+  border-color: #1e293b;
+}
+
+.rte__toolbar button {
+  border: 1px solid #cbd5f5;
+  border-radius: 0.5rem;
+  background: #f8fafc;
+  color: #1e293b;
+  font-size: 0.85rem;
+  min-width: 2rem;
+  height: 2rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  padding: 0 0.5rem;
+  transition: background 0.2s ease, color 0.2s ease, border-color 0.2s ease;
+}
+
+:host-context(.dark) .rte__toolbar button {
+  background: #1e293b;
+  border-color: #334155;
+  color: #e2e8f0;
+}
+
+.rte__toolbar button:hover:not(:disabled),
+.rte__toolbar button:focus-visible {
+  border-color: #2563eb;
+  color: #1d4ed8;
+  outline: none;
+}
+
+:host-context(.dark) .rte__toolbar button:hover:not(:disabled),
+:host-context(.dark) .rte__toolbar button:focus-visible {
+  color: #60a5fa;
+  border-color: #3b82f6;
+}
+
+.rte__toolbar button:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.rte__editor {
+  min-height: 200px;
+  padding: 1rem;
+  font-size: 0.95rem;
+  line-height: 1.6;
+  color: #0f172a;
+  overflow-y: auto;
+}
+
+:host-context(.dark) .rte__editor {
+  color: #e2e8f0;
+}
+
+.rte__editor:focus {
+  outline: none;
+}
+
+.rte__editor[data-placeholder]:empty::before {
+  content: attr(data-placeholder);
+  color: #94a3b8;
+  pointer-events: none;
+}
+
+.rte__editor a {
+  color: #2563eb;
+  text-decoration: underline;
+}
+
+:host-context(.dark) .rte__editor a {
+  color: #60a5fa;
+}
+
+.rte__editor ul,
+.rte__editor ol {
+  padding-left: 1.25rem;
+}
+
+.rte__editor blockquote {
+  border-left: 4px solid #94a3b8;
+  margin: 0.75rem 0;
+  padding-left: 0.75rem;
+  color: #475569;
+  font-style: italic;
+}
+
+:host-context(.dark) .rte__editor blockquote {
+  border-color: #3b82f6;
+  color: #cbd5f5;
+}

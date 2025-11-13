@@ -9,7 +9,8 @@ import {
   Analytics,
   OnboardingListResponse,
   ProviderSearchResult,
-  SearchHistoryItem
+  SearchHistoryItem,
+  ListingMedia
 } from '../../models/providers';
 import { ProviderProfileDefinition } from '../../models/profile-types';
 import { ServiceCategory } from '../../models/categories';
@@ -31,6 +32,9 @@ type CategoriesResponse = ApiResponse<{ categories: ServiceCategory[] }>;
 type SearchResponse = ApiResponse<{ results: ProviderSearchResult[]; meta: SearchMeta }>;
 type FavoritesResponse = ApiResponse<{ listings: Listing[] }>;
 type HistoryResponse = ApiResponse<{ history: SearchHistoryItem[] }>;
+type MediaListResponse = ApiResponse<{ media: ListingMedia[] }>;
+type MediaItemResponse = ApiResponse<{ media: ListingMedia }>;
+type PreviewResponse = ApiResponse<{ listing: ProviderSearchResult }>;
 
 interface SearchMeta {
   limit: number;
@@ -238,6 +242,67 @@ export class ProviderApiService {
   getAnalytics(): Observable<AnalyticsResponse> {
     return this.http.get<AnalyticsResponse>(`${this.base}/analytics`, { withCredentials: true });
   }
+
+  getListingMedia(listingId: string): Observable<MediaListResponse> {
+    return this.http.get<MediaListResponse>(`${this.base}/listings/${encodeURIComponent(listingId)}/media`, {
+      withCredentials: true
+    });
+  }
+
+  getListingPreview(token: string): Observable<PreviewResponse> {
+    return this.http.get<PreviewResponse>(`${this.base}/listings/previews/${encodeURIComponent(token)}`);
+  }
+
+  uploadListingMedia(listingId: string, file: File, options: ListingMediaUploadOptions): Observable<MediaItemResponse> {
+    const formData = new FormData();
+    formData.append('file', file, file.name);
+    formData.append('mediaType', options.mediaType);
+    if (options.title) {
+      formData.append('title', options.title);
+    }
+    if (options.description) {
+      formData.append('description', options.description);
+    }
+    if (options.isPrimary) {
+      formData.append('isPrimary', 'true');
+    }
+    return this.http.post<MediaItemResponse>(
+      `${this.base}/listings/${encodeURIComponent(listingId)}/media`,
+      formData,
+      { withCredentials: true }
+    );
+  }
+
+  deleteListingMedia(listingId: string, mediaId: string): Observable<ApiResponse<{ removed: string }>> {
+    return this.http.delete<ApiResponse<{ removed: string }>>(
+      `${this.base}/listings/${encodeURIComponent(listingId)}/media/${encodeURIComponent(mediaId)}`,
+      { withCredentials: true }
+    );
+  }
+
+  setPrimaryListingMedia(listingId: string, mediaId: string): Observable<MediaListResponse> {
+    return this.http.post<MediaListResponse>(
+      `${this.base}/listings/${encodeURIComponent(listingId)}/media/${encodeURIComponent(mediaId)}/primary`,
+      {},
+      { withCredentials: true }
+    );
+  }
+
+  recordListingView(listingId: string): Observable<ApiResponse<unknown>> {
+    return this.http.post<ApiResponse<unknown>>(
+      `${this.base}/listings/${encodeURIComponent(listingId)}/view`,
+      {},
+      { withCredentials: false }
+    );
+  }
+
+  recordListingContact(listingId: string): Observable<ApiResponse<unknown>> {
+    return this.http.post<ApiResponse<unknown>>(
+      `${this.base}/listings/${encodeURIComponent(listingId)}/contact`,
+      {},
+      { withCredentials: false }
+    );
+  }
 }
 
 export interface ListingRequest {
@@ -284,4 +349,11 @@ export interface ProviderSearchFilters {
   endMinute?: number;
   limit?: number;
   offset?: number;
+}
+
+export interface ListingMediaUploadOptions {
+  mediaType: 'image' | 'document';
+  title?: string;
+  description?: string;
+  isPrimary?: boolean;
 }
