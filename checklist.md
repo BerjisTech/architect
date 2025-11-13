@@ -347,7 +347,7 @@ Build a comprehensive real estate and construction platform at architect.berjis.
   - Automatically creates walls between corners
   - Close room by clicking near first corner or pressing Enter
   - Creates enclosed space in one operation
-- [ ] Implement room shape templates:
+- [x] Implement room shape templates:
   - Rectangle room (click two opposite corners)
   - Square room (click one corner, specify size)
   - L-shaped room wizard

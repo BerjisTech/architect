@@ -80,6 +80,7 @@ type CurvePreview = {
   endAngle: number;
   clockwise: boolean;
 };
+type RoomTemplate = 'rectangle'|'square'|'lshape'|'ushape'|'circle';
 
 @Component({
   selector: 'arch-design-studio',
@@ -1375,51 +1376,85 @@ export class DesignStudioPage implements OnInit, OnDestroy {
         points.push({ ...this.roomDraftPoint });
       }
     }
-    if (points.length < 3) {
-      this.setSaveState('idle', 'Add another corner to create a room.');
+    const result = this.createRoomFromFootprint(points, { recordUndo: true });
+    if (!result) {
+      this.setSaveState('error', 'Unable to create room. Check the polygon shape.');
       return;
     }
-    const first = points[0];
-    const last = points[points.length - 1];
-    if (!this.samePoint(first, last)) {
-      points.push({ ...first });
+    this.creating = false;
+    this.roomPath = [];
+    this.roomDraftPoint = null;
+    this.roomClosePreview = false;
+    this.draftA = null;
+    this.draftB = null;
+    const areaLabel = this.formatArea(result.area);
+    this.setSaveState('success', `Room created (${areaLabel}).`);
+  }
+
+  private createRoomFromFootprint(points: Point[], options?: { recordUndo?: boolean; height?: number; generateWalls?: boolean }): { roomId: string; area: number } | null {
+    const height = options?.height ?? 3000;
+    const generateWalls = options?.generateWalls ?? true;
+    const cleaned: Point[] = [];
+    points.forEach(point => {
+      if (!cleaned.length || !this.samePoint(cleaned[cleaned.length - 1], point)) {
+        cleaned.push({ x: point.x, y: point.y });
+      }
+    });
+    if (cleaned.length < 3) {
+      return null;
     }
-    const footprint = points.slice(0, points.length - 1);
-    const areaMm2 = Math.abs(this.polygonArea(footprint));
-    this.pushUndoState('room create');
+    if (this.samePoint(cleaned[0], cleaned[cleaned.length - 1])) {
+      cleaned.pop();
+    }
+    if (cleaned.length < 3) {
+      return null;
+    }
+    let area = this.polygonArea(cleaned);
+    if (!Number.isFinite(area) || Math.abs(area) < 1) {
+      return null;
+    }
+    if (area < 0) {
+      cleaned.reverse();
+      area = -area;
+    }
+    if (options?.recordUndo) {
+      this.pushUndoState('room create');
+    }
     const newWallIds: string[] = [];
-    for (let i = 0; i < points.length - 1; i++) {
-      const a = points[i];
-      const b = points[i + 1];
-      if (this.samePoint(a, b)) {
-        continue;
+    if (generateWalls) {
+      for (let i = 0; i < cleaned.length; i++) {
+        const a = cleaned[i];
+        const b = cleaned[(i + 1) % cleaned.length];
+        if (this.samePoint(a, b)) {
+          continue;
+        }
+        const base: Wall = {
+          id: this.uid(),
+          a: { ...a },
+          b: { ...b },
+          thickness: this.wallThickness,
+          height: this.wallHeight,
+          openings: [],
+          type: this.currentWallType,
+          offset: 0
+        };
+        const segments = this.splitAgainstAllWalls(base);
+        if (segments.length) {
+          segments.forEach(segment => newWallIds.push(segment.id));
+          this.walls.push(...segments);
+        }
       }
-      const base: Wall = {
-        id: this.uid(),
-        a: { ...a },
-        b: { ...b },
-        thickness: this.wallThickness,
-        height: this.wallHeight,
-        openings: [],
-        type: this.currentWallType,
-        offset: 0
-      };
-      const segments = this.splitAgainstAllWalls(base);
-      if (segments.length) {
-        segments.forEach(segment => newWallIds.push(segment.id));
-        this.walls.push(...segments);
+      if (newWallIds.length) {
+        this.mergeNearbyNodes();
       }
     }
-    if (newWallIds.length) {
-      this.mergeNearbyNodes();
-      this.rebuildMeshes();
-      this.invalidate3dCache();
-    }
+    this.rebuildMeshes();
+    this.invalidate3dCache();
     let minX = Number.POSITIVE_INFINITY;
     let minY = Number.POSITIVE_INFINITY;
     let maxX = Number.NEGATIVE_INFINITY;
     let maxY = Number.NEGATIVE_INFINITY;
-    footprint.forEach(point => {
+    cleaned.forEach(point => {
       minX = Math.min(minX, point.x);
       minY = Math.min(minY, point.y);
       maxX = Math.max(maxX, point.x);
@@ -1432,16 +1467,174 @@ export class DesignStudioPage implements OnInit, OnDestroy {
       y: minY,
       w: Math.max(0, maxX - minX),
       h: Math.max(0, maxY - minY),
-      height: 3000
+      height
     });
-    this.creating = false;
-    this.roomPath = [];
-    this.roomDraftPoint = null;
-    this.roomClosePreview = false;
-    this.draftA = null;
-    this.draftB = null;
-    const areaLabel = this.formatArea(areaMm2);
-    this.setSaveState('success', `Room created (${areaLabel}).`);
+    this.selectedRoomId = roomId;
+    this.selectedWallIds = [];
+    this.selectedWallId = null;
+    this.selectedWallPoint = null;
+    this.selectedWallT = null;
+    return { roomId, area };
+  }
+
+  private getViewCenter(): Point {
+    return {
+      x: this.minX + this.width / 2,
+      y: this.minY + this.height / 2
+    };
+  }
+
+  private promptDimension(label: string, defaultMeters: number): number | null {
+    const defaultValue = defaultMeters.toString();
+    const input = window.prompt(label, defaultValue);
+    if (input === null) {
+      return null;
+    }
+    const value = Number(input);
+    if (!Number.isFinite(value) || value <= 0) {
+      this.setSaveState('idle', 'Please enter a positive number.');
+      return null;
+    }
+    return value * 1000;
+  }
+
+  private instantiateRoomTemplate(points: Point[], templateName: string): void {
+    const result = this.createRoomFromFootprint(points, { recordUndo: true });
+    if (!result) {
+      this.setSaveState('error', `${templateName} room could not be created. Check the dimensions.`);
+      return;
+    }
+    const areaLabel = this.formatArea(result.area);
+    this.setSaveState('success', `${templateName} room created (${areaLabel}).`);
+  }
+
+  private createRectangleFootprint(center: Point, width: number, depth: number): Point[] {
+    const halfW = width / 2;
+    const halfD = depth / 2;
+    return [
+      { x: center.x - halfW, y: center.y - halfD },
+      { x: center.x + halfW, y: center.y - halfD },
+      { x: center.x + halfW, y: center.y + halfD },
+      { x: center.x - halfW, y: center.y + halfD }
+    ];
+  }
+
+  private createCircularFootprint(center: Point, radius: number, segments = 24): Point[] {
+    const points: Point[] = [];
+    for (let i = 0; i < segments; i++) {
+      const angle = (Math.PI * 2 * i) / segments;
+      points.push({
+        x: center.x + radius * Math.cos(angle),
+        y: center.y + radius * Math.sin(angle)
+      });
+    }
+    return points;
+  }
+
+  private createLShapeFootprint(center: Point, width: number, depth: number, notchWidth: number, notchDepth: number): Point[] | null {
+    if (notchWidth >= width || notchDepth >= depth) {
+      return null;
+    }
+    const halfW = width / 2;
+    const halfD = depth / 2;
+    const notchX = halfW - notchWidth;
+    const notchY = -halfD + notchDepth;
+    return [
+      { x: center.x - halfW, y: center.y - halfD },
+      { x: center.x + halfW, y: center.y - halfD },
+      { x: center.x + halfW, y: center.y + notchY },
+      { x: center.x + notchX, y: center.y + notchY },
+      { x: center.x + notchX, y: center.y + halfD },
+      { x: center.x - halfW, y: center.y + halfD }
+    ];
+  }
+
+  private createUShapeFootprint(center: Point, width: number, depth: number, legThickness: number, openingWidth: number): Point[] | null {
+    if (legThickness >= depth || openingWidth >= width) {
+      return null;
+    }
+    const halfW = width / 2;
+    const halfD = depth / 2;
+    const openingHalf = openingWidth / 2;
+    const innerY = -halfD + legThickness;
+    return [
+      { x: center.x - halfW, y: center.y - halfD },
+      { x: center.x + halfW, y: center.y - halfD },
+      { x: center.x + halfW, y: center.y + innerY },
+      { x: center.x + openingHalf, y: center.y + innerY },
+      { x: center.x + openingHalf, y: center.y + halfD },
+      { x: center.x - openingHalf, y: center.y + halfD },
+      { x: center.x - openingHalf, y: center.y + innerY },
+      { x: center.x - halfW, y: center.y + innerY }
+    ];
+  }
+
+  createRoomTemplate(template: RoomTemplate): void {
+    if (this.creating && this.mode === 'room') {
+      this.cancelDraft();
+    }
+    const center = this.getViewCenter();
+    switch (template) {
+      case 'rectangle': {
+        const width = this.promptDimension('Rectangle width (m)', 5);
+        if (width === null) return;
+        const depth = this.promptDimension('Rectangle depth (m)', 4);
+        if (depth === null) return;
+        const footprint = this.createRectangleFootprint(center, width, depth);
+        this.instantiateRoomTemplate(footprint, 'Rectangle');
+        break;
+      }
+      case 'square': {
+        const size = this.promptDimension('Square side length (m)', 4);
+        if (size === null) return;
+        const footprint = this.createRectangleFootprint(center, size, size);
+        this.instantiateRoomTemplate(footprint, 'Square');
+        break;
+      }
+      case 'circle': {
+        const radius = this.promptDimension('Circle radius (m)', 3);
+        if (radius === null) return;
+        const footprint = this.createCircularFootprint(center, radius);
+        this.instantiateRoomTemplate(footprint, 'Circular');
+        break;
+      }
+      case 'lshape': {
+        const width = this.promptDimension('L-shape overall width (m)', 8);
+        if (width === null) return;
+        const depth = this.promptDimension('L-shape overall depth (m)', 6);
+        if (depth === null) return;
+        const notchWidth = this.promptDimension('Notch width (m)', 3);
+        if (notchWidth === null) return;
+        const notchDepth = this.promptDimension('Notch depth (m)', 3);
+        if (notchDepth === null) return;
+        const footprint = this.createLShapeFootprint(center, width, depth, notchWidth, notchDepth);
+        if (!footprint) {
+          this.setSaveState('idle', 'Ensure notch width/depth are smaller than the overall dimensions.');
+          return;
+        }
+        this.instantiateRoomTemplate(footprint, 'L-shaped');
+        break;
+      }
+      case 'ushape': {
+        const width = this.promptDimension('U-shape overall width (m)', 10);
+        if (width === null) return;
+        const depth = this.promptDimension('U-shape overall depth (m)', 8);
+        if (depth === null) return;
+        const legThickness = this.promptDimension('Leg thickness (m)', 2);
+        if (legThickness === null) return;
+        const openingWidth = this.promptDimension('Opening width (m)', 4);
+        if (openingWidth === null) return;
+        const footprint = this.createUShapeFootprint(center, width, depth, legThickness, openingWidth);
+        if (!footprint) {
+          this.setSaveState('idle', 'Opening width must be smaller than total width and leg thickness smaller than depth.');
+          return;
+        }
+        this.instantiateRoomTemplate(footprint, 'U-shaped');
+        break;
+      }
+      default:
+        break;
+    }
   }
 
   private addWallSegment(target: Point): void {
