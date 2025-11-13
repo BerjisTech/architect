@@ -164,13 +164,13 @@ Build a comprehensive real estate and construction platform at architect.berjis.
 - [x] Create listing analytics (views, contacts)
 
 ### 4.4 Request/Quote System
-- [ ] Create request-for-quote (RFQ) functionality
-- [ ] Implement quote submission system for providers
-- [ ] Create quote comparison interface
-- [ ] Add communication thread for each request
-- [ ] Implement quote acceptance/rejection flow
-- [ ] Create quote expiration handling
-- [ ] Add quote revision capability
+- [x] Create request-for-quote (RFQ) functionality
+- [x] Implement quote submission system for providers
+- [x] Create quote comparison interface
+- [x] Add communication thread for each request
+- [x] Implement quote acceptance/rejection flow
+- [x] Create quote expiration handling
+- [x] Add quote revision capability
 
 ---
 
@@ -188,7 +188,7 @@ Build a comprehensive real estate and construction platform at architect.berjis.
   - [x] Configurable grid spacing (metric: cm/m, imperial: in/ft)
   - [x] Visual grid display with major/minor lines
   - [x] Grid opacity control
-- [ ] Create viewport management:
+- [x] Create viewport management:
   - [x] Zoom levels (10% to 1000%)
   - [x] Pan with mouse drag or keyboard
   - [x] Fit-to-view functionality
@@ -196,7 +196,7 @@ Build a comprehensive real estate and construction platform at architect.berjis.
     - Smooth viewport easing for reset, fit-to-content, and selection focus
     - Added UE-style shortcuts (Alt+1-4 lighting, Alt+G/H/K/J view switches, Q/W/E/R tool binds)
   - [x] Reset view position
-- [ ] Implement rendering optimization:
+- [x] Implement rendering optimization:
   - [x] Viewport culling (only render visible elements)
   - [x] Level of detail (LOD) for complex objects
     - Stroke width scaling, handle/measurement suppression, and opening filtering when zoomed out
@@ -207,7 +207,7 @@ Build a comprehensive real estate and construction platform at architect.berjis.
 ### 5.2 Wall Drawing System (Core Feature)
 
 #### 5.2.1 Wall Creation
-- [ ] Implement click-to-draw wall tool:
+- [x] Implement click-to-draw wall tool:
   - First click sets start point
   - Move mouse shows preview line
   - Second click sets end point and creates wall
@@ -220,7 +220,7 @@ Build a comprehensive real estate and construction platform at architect.berjis.
   - After creating wall, automatically start new wall from endpoint
   - Double-click or press Enter to finish wall chain
   - Right-click to undo last segment
-- [ ] Implement wall constraints:
+- [x] Implement wall constraints:
   - [x] Maintain parallel/perpendicular to existing walls
   - [x] Minimum wall length validation
   - [x] Maximum wall length warnings
@@ -261,22 +261,22 @@ Build a comprehensive real estate and construction platform at architect.berjis.
   - [x] Snap to other walls while dragging
   - [x] Maintain intersections when moving walls
   - [x] Show dimension guides while moving
-- [ ] Implement wall deletion:
+- [x] Implement wall deletion:
   - Delete key or right-click context menu
   - Automatic cleanup of orphaned elements (doors/windows)
   - Confirmation for walls with attached elements
   - Undo support for deletion
 
 #### 5.2.4 Wall Properties Panel & Tools Popup
-- [ ] Create contextual wall tools popup (appears when wall selected):
+- [x] Create contextual wall tools popup (appears when wall selected):
   - Positioned near selected wall (non-intrusive)
   - Quick access buttons for common operations
   - Dismissible but stays visible during editing
-- [ ] Implement wall length adjustment:
+- [x] Implement wall length adjustment:
   - Input field for exact length entry
   - Plus/minus buttons for incremental adjustment
   - Real-time preview of length change
-- [ ] Create directional expansion/contraction:
+- [x] Create directional expansion/contraction:
   - For **vertical walls** (oriented up-down on 2D viewport):
     - "Expand/Contract Upward" button
     - "Expand/Contract Downward" button
@@ -287,53 +287,53 @@ Build a comprehensive real estate and construction platform at architect.berjis.
     - "Both Directions" button (expand/contract from center)
   - Visual indicators showing direction of expansion
   - Preserve intersections and connections during expansion
-- [ ] Add wall orientation detection:
+- [x] Add wall orientation detection:
   - Calculate wall angle (0-360°)
   - Classify as vertical, horizontal, or diagonal
   - Display orientation in tools popup
   - Show compass bearing (N, NE, E, SE, S, SW, W, NW)
-- [ ] Implement wall thickness controls:
-  - [ ] Dropdown for standard thicknesses (e.g., 4", 6", 8", 10", 12")
+- [x] Implement wall thickness controls:
+  - [x] Dropdown for standard thicknesses (e.g., 4", 6", 8", 10", 12")
   - [x] Custom thickness input
-  - [ ] Preview thickness change before applying
-  - [ ] Option to maintain interior/exterior edge when changing thickness
-- [ ] Create wall height controls (for 3D):
-  - [ ] Standard heights dropdown (8ft, 9ft, 10ft, etc.)
+  - [x] Preview thickness change before applying
+  - [x] Option to maintain interior/exterior edge when changing thickness
+- [x] Create wall height controls (for 3D):
+  - [x] Standard heights dropdown (8ft, 9ft, 10ft, etc.)
   - [x] Custom height input
-  - [ ] Different heights for different walls
+  - [x] Different heights for different walls
   - [x] Automatic 3D view update
-- [ ] Add wall style/type selector:
-  - Exterior wall
-  - Interior wall
-  - Load-bearing wall
-  - Partition wall
-  - Different visual styles for each type
+- [x] Add wall style/type selector:
+  - [x] Exterior wall
+  - [x] Interior wall
+  - [x] Load-bearing wall
+  - [x] Partition wall
+  - [x] Different visual styles for each type
 
 #### 5.2.5 Wall Splitting Tool
-- [ ] Create manual wall split functionality:
+- [x] Create manual wall split functionality:
   - "Split Wall" button in tools popup
   - Click on wall at desired split point
   - Snap to grid or specific measurements
   - Creates two connected wall segments
   - Maintains all wall properties on both segments
-- [ ] Implement split point indicators:
+- [x] Implement split point indicators:
   - Visual markers showing potential split points
   - Snap to divisions (quarters, thirds, halves)
   - Distance measurements from endpoints
 
 #### 5.2.6 Wall Curving & Advanced Shapes
-- [ ] Implement curved wall creation:
+- [x] Implement curved wall creation:
   - "Curve Wall" tool in tools popup
   - Click three points: start, arc point, end
   - Adjustable arc radius
   - Convert straight wall to curved wall
   - Control point manipulation for curve adjustment
-- [ ] Create arc/circle wall segments:
+- [x] Create arc/circle wall segments:
   - Quarter-circle walls
   - Half-circle walls
   - Full circle walls (for round rooms)
   - Elliptical wall segments
-- [ ] Implement curved wall properties:
+- [x] Implement curved wall properties:
   - Arc radius display and adjustment
   - Arc angle measurement
   - Arc length calculation
@@ -342,7 +342,7 @@ Build a comprehensive real estate and construction platform at architect.berjis.
 ### 5.3 Room Creation System
 
 #### 5.3.1 Automatic Room Drawing
-- [ ] Create "Draw Room" tool:
+- [x] Create "Draw Room" tool:
   - Click to define room corners
   - Automatically creates walls between corners
   - Close room by clicking near first corner or pressing Enter

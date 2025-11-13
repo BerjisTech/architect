@@ -16,6 +16,7 @@ import (
 	"github.com/berjistech/berjis-ecosystem/architect/service/internal/coreapi"
 	"github.com/berjistech/berjis-ecosystem/architect/service/internal/profile"
 	"github.com/berjistech/berjis-ecosystem/architect/service/internal/providers"
+	"github.com/berjistech/berjis-ecosystem/architect/service/internal/rfq"
 	coreauth "github.com/berjistech/berjis-ecosystem/shared/coreauth"
 )
 
@@ -88,6 +89,8 @@ func New(opts Options) *fiber.App {
 
 		providerStore := providers.NewStore(db)
 		registerProviderRoutes(public, protected, providerStore, db, opts.CoreAPIClient, logger, opts.MediaUploadDir)
+		rfqStore := rfq.NewStore(db)
+		registerRFQRoutes(protected, rfqStore)
 	}
 
 	// Floorplans CRUD

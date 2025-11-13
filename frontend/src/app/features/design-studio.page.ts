@@ -10,7 +10,20 @@ import { CoreAuthService, CoreAuthSession } from '@berjis/angular-auth';
 
 type Point = { x: number; y: number };
 type Opening = { id: string; kind: 'door'|'window'; offset: number; width: number };
-type Wall = { id: string; a: Point; b: Point; thickness: number; height: number; openings: Opening[] };
+type WallType = 'interior'|'exterior'|'loadbearing'|'partition';
+type Wall = {
+  id: string;
+  a: Point;
+  b: Point;
+  thickness: number;
+  height: number;
+  openings: Opening[];
+  type: WallType;
+  offset: number;
+  compositeId?: string;
+  compositeT0?: number;
+  compositeT1?: number;
+};
 type Room = { id: string; x: number; y: number; w: number; h: number; height: number };
 type WallDragAnchor = { wall: Wall; end: 'a'|'b'; point: Point };
 type MeasurementSegment = { id: string; a: Point; b: Point; length: number };
@@ -41,6 +54,31 @@ type WallNodeDirection = {
   length: number;
   wall: Wall;
   end: 'a'|'b';
+};
+type StudioSnapshot = { walls: Wall[]; rooms: Room[]; description: string };
+type SplitHint = { id: string; t: number; point: Point; offset: number; fromEnd: number };
+type CurveComposite = {
+  id: string;
+  segmentIds: string[];
+  center: Point;
+  radius: number;
+  startAngle: number;
+  endAngle: number;
+  clockwise: boolean;
+  control: Point;
+  closed: boolean;
+  samplePoints: Point[];
+};
+type CurveDraft =
+  | { kind: 'create'; stage: 'start'|'control'|'end'; start?: Point; control?: Point }
+  | { kind: 'convert'; stage: 'control'; wallId: string; start: Point; end: Point };
+type CurvePreview = {
+  points: Point[];
+  center: Point;
+  radius: number;
+  startAngle: number;
+  endAngle: number;
+  clockwise: boolean;
 };
 
 @Component({
@@ -83,7 +121,7 @@ export class DesignStudioPage implements OnInit, OnDestroy {
   private readonly defaultGridOpacity = 0.35;
 
   // Drawing state
-  mode: 'select'|'pan'|'wall'|'room'|'door'|'window'|'measure' = 'select';
+  mode: 'select'|'pan'|'wall'|'curve'|'room'|'door'|'window'|'measure' = 'select';
   creating = false;
   lightingPreset: LightingPreset = 'lit';
   // world objects
@@ -100,6 +138,16 @@ export class DesignStudioPage implements OnInit, OnDestroy {
   selectedWallIds: string[] = [];
   selectedWallPoint: Point | null = null;
   selectedWallT: number | null = null;
+  manualSplitActive = false;
+  manualSplitPreview: { wallId: string; point: Point; offset: number; fromEnd: number; t: number } | null = null;
+  splitHints: SplitHint[] = [];
+  activeSplitHintId: string | null = null;
+  curveComposites = new Map<string, CurveComposite>();
+  curveDraft: CurveDraft | null = null;
+  curvePreview: CurvePreview | null = null;
+  roomPath: Point[] = [];
+  roomDraftPoint: Point | null = null;
+  roomClosePreview = false;
   selectedRoomId: string | null = null;
   dragging: null
     | {
@@ -128,6 +176,21 @@ export class DesignStudioPage implements OnInit, OnDestroy {
   // tool properties
   wallThickness = 200; // mm world units
   wallHeight = 3000;   // mm
+  standardThicknesses: number[] = [90, 110, 140, 200, 300];
+  standardHeights: number[] = [2400, 2700, 3000, 3300, 3600];
+  thicknessAnchor: 'center'|'left'|'right' = 'center';
+  pendingThickness: number | null = null;
+  thicknessPreviewPaths: { id: string; path: string }[] = [];
+  currentWallType: WallType = 'interior';
+  wallTypeOptions: WallType[] = ['interior', 'exterior', 'loadbearing', 'partition'];
+  wallTypePalette: Record<WallType, { base: string; selected: string; outline: string; outlineSelected: string }> = {
+    interior: { base: '#1f2937', selected: '#2563eb', outline: '#0f172a', outlineSelected: '#1d4ed8' },
+    exterior: { base: '#475569', selected: '#f97316', outline: '#1f2937', outlineSelected: '#ea580c' },
+    loadbearing: { base: '#4d7c0f', selected: '#22c55e', outline: '#365314', outlineSelected: '#16a34a' },
+    partition: { base: '#334155', selected: '#a855f7', outline: '#1e293b', outlineSelected: '#9333ea' }
+  };
+  private undoStack: StudioSnapshot[] = [];
+  private redoStack: StudioSnapshot[] = [];
   openingWidth = 900;  // mm
   lengthDelta = 200;
   private readonly wallMinLength = 400;
@@ -261,6 +324,10 @@ export class DesignStudioPage implements OnInit, OnDestroy {
     this.skipNextClick = false;
     this.roomMeshes = [];
     this.wallFaces = [];
+    this.currentWallType = 'interior';
+    this.thicknessAnchor = 'center';
+    this.pendingThickness = null;
+    this.thicknessPreviewPaths = [];
     this.invalidate3dCache();
     this.guideOverlay = null;
     this.pendingIntersection = null;
@@ -274,7 +341,13 @@ export class DesignStudioPage implements OnInit, OnDestroy {
     this.selectedWallId = null;
     this.selectedWallPoint = null;
     this.selectedWallT = null;
+    this.manualSplitActive = false;
+    this.manualSplitPreview = null;
+    this.splitHints = [];
+    this.activeSplitHintId = null;
     this.selectedRoomId = null;
+    this.pendingThickness = null;
+    this.thicknessPreviewPaths = [];
   }
   private cancelDraft(): void {
     if (!this.creating) {
@@ -284,6 +357,9 @@ export class DesignStudioPage implements OnInit, OnDestroy {
     this.draftA = null;
     this.draftB = null;
     this.wallPath = [];
+    this.roomPath = [];
+    this.roomDraftPoint = null;
+    this.roomClosePreview = false;
     this.guideOverlay = null;
     this.pendingIntersection = null;
   }
@@ -379,7 +455,68 @@ export class DesignStudioPage implements OnInit, OnDestroy {
       this.skipNextClick = false;
       return;
     }
+    if (this.mode !== 'curve' && this.curveDraft) {
+      this.curveDraft = null;
+      this.curvePreview = null;
+    }
     const raw = this.toWorld(e);
+    if (this.manualSplitActive && this.mode === 'select') {
+      const wall = this.selectedWall;
+      if (!wall) {
+        this.manualSplitActive = false;
+        this.manualSplitPreview = null;
+        this.splitHints = [];
+        this.activeSplitHintId = null;
+        this.refreshSplitHints();
+        this.setSaveState('idle', 'Split cancelled.');
+        return;
+      }
+      const point = this.resolveGenericPoint(raw);
+      const { dist, t } = this.pointSegDistanceParam(point, wall.a, wall.b);
+      const tolerance = this.manualSplitTolerance(wall);
+      if (dist <= tolerance) {
+        const snappedT = this.snapManualSplitParam(wall, t);
+        if (snappedT <= this.intersectionEpsilon || snappedT >= 1 - this.intersectionEpsilon) {
+          this.setSaveState('idle', 'Choose a point away from the wall ends.');
+        } else if (this.wallHasNodeAtParam(wall, snappedT)) {
+          this.setSaveState('idle', 'Existing junction selected. No split created.');
+        } else {
+          const snapshot = this.createSnapshot('manual wall split');
+          this.selectedWallT = snappedT;
+          this.updateSelectedWallPoint();
+          const result = this.ensureNodeAtSelection();
+          if (result?.created) {
+            this.undoStack.push(snapshot);
+            if (this.undoStack.length > 50) {
+              this.undoStack.shift();
+            }
+            this.redoStack = [];
+            const length = this.segLen(wall.a, wall.b);
+            const offset = snappedT * length;
+            this.setSaveState('success', `Wall split at ${this.formatLength(offset)}.`);
+            this.invalidate3dCache();
+            if (this.viewPort === '3d') {
+              this.scheduleFrame();
+            }
+          } else {
+            this.setSaveState('idle', 'Existing junction selected. No split created.');
+          }
+        }
+      } else {
+        this.setSaveState('idle', 'Split cancelled.');
+      }
+      this.manualSplitActive = false;
+      this.manualSplitPreview = null;
+      this.splitHints = [];
+      this.activeSplitHintId = null;
+      this.refreshSplitHints();
+      return;
+    }
+    if (this.mode === 'curve') {
+      const point = this.resolveGenericPoint(raw);
+      this.handleCurveClick(point);
+      return;
+    }
     if (this.mode !== 'wall') {
       this.guideOverlay = null;
       this.pendingIntersection = null;
@@ -458,6 +595,7 @@ export class DesignStudioPage implements OnInit, OnDestroy {
         }
         this.selectedRoomId = null;
         this.selectedWallIds = nextIds;
+        this.includeCompositeMembers(wallId);
         this.selectedWallT = hit.t;
         this.syncPrimarySelection(wallId);
         const primaryWall = this.selectedWall;
@@ -490,15 +628,26 @@ export class DesignStudioPage implements OnInit, OnDestroy {
       return;
     }
     if(this.mode==='room'){
-      const p = this.resolveGenericPoint(raw);
+      const point = this.resolveGenericPoint(raw);
       if(!this.creating){
-        const start = { ...p };
         this.creating = true;
-        this.draftA = start;
-        this.draftB = start;
+        this.roomPath = [{ ...point }];
+        this.roomDraftPoint = { ...point };
+        this.roomClosePreview = false;
+        this.setSaveState('idle', 'Room tool: add corners, click start point or press Enter to close.');
       } else {
-        this.draftB = { ...p };
-        this.finishRoomDrawing();
+        const first = this.roomPath[0];
+        const closeToFirst = this.roomPath.length >= 2 && this.dist(point, first) <= this.roomCloseTolerance();
+        if (closeToFirst) {
+          this.finalizeRoomDraft(false);
+        } else {
+          const last = this.roomPath[this.roomPath.length - 1];
+          if (!this.samePoint(last, point)) {
+            this.roomPath.push({ ...point });
+            this.roomDraftPoint = { ...point };
+            this.roomClosePreview = false;
+          }
+        }
       }
       return;
     }
@@ -526,6 +675,9 @@ export class DesignStudioPage implements OnInit, OnDestroy {
     // handle pan first
     if(this.mode==='pan'){
       this.panning = true; this.panStart = { x: e.clientX, y: e.clientY }; this.viewStart = { minX: this.minX, minY: this.minY }; return;
+    }
+    if (this.mode === 'curve') {
+      return;
     }
     const p = this.resolveGenericPoint(this.toWorld(e));
     // if select, attempt to start dragging handle
@@ -561,6 +713,7 @@ export class DesignStudioPage implements OnInit, OnDestroy {
       }
       const wallHit = this.pickWallAtPoint(p, 30);
       if (wallHit) {
+        const wallId = wallHit.wall.id;
         const multiKey = e.ctrlKey || e.metaKey;
         const rangeKey = e.shiftKey;
         let nextIds = [...this.selectedWallIds];
@@ -586,6 +739,7 @@ export class DesignStudioPage implements OnInit, OnDestroy {
         }
         this.selectedRoomId = null;
         this.selectedWallIds = nextIds;
+        this.includeCompositeMembers(wallId);
         this.selectedWallT = wallHit.t;
         this.syncPrimarySelection(wallHit.wall.id);
         const targetIds = this.selectedWallIds.includes(wallHit.wall.id)
@@ -624,6 +778,10 @@ export class DesignStudioPage implements OnInit, OnDestroy {
       return;
     }
     const raw = this.toWorld(e);
+    if (this.mode !== 'curve' && this.curveDraft) {
+      this.curveDraft = null;
+      this.curvePreview = null;
+    }
     if(this.mode==='measure'){
       if(this.measureStart){
         this.measureDraft = this.resolveGenericPoint(raw);
@@ -634,13 +792,19 @@ export class DesignStudioPage implements OnInit, OnDestroy {
       }
       return;
     }
+    if (this.mode === 'curve') {
+      const point = this.resolveGenericPoint(raw);
+      this.updateCurvePreview(point);
+      return;
+    }
     if(this.creating){
       if(this.mode==='wall'){
         this.draftB = this.resolveWallPoint(raw);
         return;
       }
       if(this.mode==='room'){
-        this.draftB = this.resolveGenericPoint(raw);
+        const p = this.resolveGenericPoint(raw);
+        this.updateRoomDraftPreview(p);
         return;
       }
     }
@@ -696,6 +860,40 @@ export class DesignStudioPage implements OnInit, OnDestroy {
       }
       return;
     }
+    if (this.manualSplitActive && this.mode === 'select') {
+      const wall = this.selectedWall;
+      if (wall) {
+        const { dist, t } = this.pointSegDistanceParam(p, wall.a, wall.b);
+        const tolerance = this.manualSplitTolerance(wall);
+        if (dist <= tolerance) {
+          const snappedT = this.snapManualSplitParam(wall, t);
+          const clamped = Math.max(0, Math.min(1, snappedT));
+          const point = {
+            x: wall.a.x + (wall.b.x - wall.a.x) * clamped,
+            y: wall.a.y + (wall.b.y - wall.a.y) * clamped
+          };
+          const length = this.segLen(wall.a, wall.b);
+          const offset = clamped * length;
+          this.manualSplitPreview = {
+            wallId: wall.id,
+            point,
+            offset,
+            fromEnd: length - offset,
+            t: clamped
+          };
+          this.updateActiveSplitHint(clamped);
+        } else {
+          this.manualSplitPreview = null;
+          this.activeSplitHintId = null;
+        }
+      } else {
+        this.manualSplitPreview = null;
+        this.activeSplitHintId = null;
+      }
+    } else if (!this.manualSplitActive) {
+      this.manualSplitPreview = null;
+      this.activeSplitHintId = null;
+    }
   }
   onMouseUp(){
     if(this.panning){ this.panning = false; }
@@ -722,6 +920,19 @@ export class DesignStudioPage implements OnInit, OnDestroy {
       this.skipNextClick = false;
       return;
     }
+    if (this.mode === 'curve' && this.curveDraft) {
+      this.resetCurveDraft('select');
+      this.setSaveState('idle', 'Curve cancelled.');
+      return;
+    }
+    if (this.manualSplitActive) {
+      this.manualSplitActive = false;
+      this.manualSplitPreview = null;
+      this.splitHints = [];
+      this.activeSplitHintId = null;
+      this.setSaveState('idle', 'Split cancelled.');
+      return;
+    }
     if (this.dragging) {
       if (this.dragging.kind === 'wall-body') {
         this.dragging.walls.forEach(entry => {
@@ -741,7 +952,15 @@ export class DesignStudioPage implements OnInit, OnDestroy {
     }
     if(this.creating){
       if(this.mode==='wall'){ this.finishWallDrawing(); }
-      else if(this.mode==='room'){ this.creating=false; this.draftA=null; this.draftB=null; }
+      else if(this.mode==='room'){
+        this.creating=false;
+        this.roomPath=[];
+        this.roomDraftPoint=null;
+        this.roomClosePreview = false;
+        this.draftA=null;
+        this.draftB=null;
+        this.setSaveState('idle', 'Room drafting cancelled.');
+      }
     }
     if (this.mode !== 'wall') {
       this.guideOverlay = null;
@@ -813,6 +1032,25 @@ export class DesignStudioPage implements OnInit, OnDestroy {
     if (!event.altKey && isEditableTarget) {
       return;
     }
+    if ((event.ctrlKey || event.metaKey) && key === 'z') {
+      event.preventDefault();
+      if (event.shiftKey) {
+        this.redoLastAction();
+      } else {
+        this.undoLastAction();
+      }
+      return;
+    }
+    if ((event.ctrlKey || event.metaKey) && !event.shiftKey && key === 'y') {
+      event.preventDefault();
+      this.redoLastAction();
+      return;
+    }
+    if (!event.altKey && !event.ctrlKey && !event.metaKey && (key === 'delete' || key === 'backspace')) {
+      event.preventDefault();
+      this.deleteSelectedWall();
+      return;
+    }
     if (event.altKey && !event.ctrlKey && !event.metaKey) {
       if (['1', '2', '3', '4'].includes(key)) {
         event.preventDefault();
@@ -872,6 +1110,12 @@ export class DesignStudioPage implements OnInit, OnDestroy {
       case 'r':
         event.preventDefault();
         this.activateModeShortcut('room', 'Room tool (R).');
+        break;
+      case 'enter':
+        if (this.mode === 'room' && this.creating && this.roomPath.length >= 2) {
+          event.preventDefault();
+          this.finalizeRoomDraft(true);
+        }
         break;
       default:
         break;
@@ -1006,16 +1250,18 @@ export class DesignStudioPage implements OnInit, OnDestroy {
     return this.lodDetail !== 'low';
   }
   wallFillColor(w: Wall): string {
+    const palette = this.wallTypePalette[w.type ?? 'interior'];
     if (!this.selectedWallIds.includes(w.id)) {
-      return '#111827';
+      return palette.base;
     }
-    return this.selectedWallId === w.id ? '#2563eb' : '#1d4ed8';
+    return this.selectedWallId === w.id ? palette.selected : palette.outlineSelected;
   }
   wallOutlineStrokeColor(w: Wall): string {
+    const palette = this.wallTypePalette[w.type ?? 'interior'];
     if (!this.selectedWallIds.includes(w.id)) {
-      return '#0f172a';
+      return palette.outline;
     }
-    return this.selectedWallId === w.id ? '#1d4ed8' : '#2563eb';
+    return this.selectedWallId === w.id ? palette.outlineSelected : palette.selected;
   }
   wallOutlineStrokeWidth(): number {
     if (this.lodDetail === 'high') {
@@ -1053,26 +1299,165 @@ export class DesignStudioPage implements OnInit, OnDestroy {
     this.guideOverlay = null;
   }
 
-  private finishRoomDrawing(): void {
-    if(!this.draftA || !this.draftB){ return; }
-    const x = Math.min(this.draftA.x, this.draftB.x);
-    const y = Math.min(this.draftA.y, this.draftB.y);
-    const w = Math.abs(this.draftA.x - this.draftB.x);
-    const h = Math.abs(this.draftA.y - this.draftB.y);
-    if(w>0 && h>0){
-      this.rooms.push({ id:this.uid(), x, y, w, h, height:3000 });
-      this.rebuildMeshes();
+  private roomCloseTolerance(): number {
+    return Math.max(36, this.gridSpacing * 0.6);
+  }
+
+  private updateRoomDraftPreview(point: Point): void {
+    if (!this.creating || this.mode !== 'room') {
+      return;
     }
+    this.roomDraftPoint = { ...point };
+    if (this.roomPath.length >= 2) {
+      const first = this.roomPath[0];
+      this.roomClosePreview = this.dist(first, point) <= this.roomCloseTolerance();
+    } else {
+      this.roomClosePreview = false;
+    }
+  }
+
+  roomDraftPathString(): string {
+    if (!this.creating || this.mode !== 'room') {
+      return '';
+    }
+    const vertices = this.roomDraftVerticesForDisplay();
+    if (vertices.length < 2) {
+      return '';
+    }
+    const commands = [`M ${vertices[0].x} ${vertices[0].y}`];
+    for (let i = 1; i < vertices.length; i++) {
+      commands.push(`L ${vertices[i].x} ${vertices[i].y}`);
+    }
+    return commands.join(' ');
+  }
+
+  roomDraftVerticesForDisplay(): Point[] {
+    const vertices = this.roomPath.map(point => ({ ...point }));
+    if (this.roomDraftPoint && (!vertices.length || !this.samePoint(vertices[vertices.length - 1], this.roomDraftPoint))) {
+      vertices.push({ ...this.roomDraftPoint });
+    }
+    return vertices;
+  }
+
+  roomDraftLabel(): { point: Point; area: string } | null {
+    if (!this.creating || this.mode !== 'room') {
+      return null;
+    }
+    const vertices = this.roomDraftVerticesForDisplay();
+    if (vertices.length < 3) {
+      return null;
+    }
+    const footprint = [...vertices];
+    if (!this.samePoint(footprint[0], footprint[footprint.length - 1])) {
+      footprint.push({ ...footprint[0] });
+    }
+    const simple = footprint.slice(0, footprint.length - 1);
+    const areaMm2 = Math.abs(this.polygonArea(simple));
+    if (!Number.isFinite(areaMm2) || areaMm2 <= 1) {
+      return null;
+    }
+    const centroid = this.polygonCentroid(simple);
+    return { point: centroid, area: this.formatArea(areaMm2) };
+  }
+
+  private finalizeRoomDraft(forceCloseWithPreview: boolean): void {
+    if (!this.creating || this.mode !== 'room') {
+      return;
+    }
+    if (this.roomPath.length < 2) {
+      this.setSaveState('idle', 'Add at least two corners before closing the room.');
+      return;
+    }
+    let points = this.roomPath.map(point => ({ ...point }));
+    if (forceCloseWithPreview && this.roomDraftPoint) {
+      const last = points[points.length - 1];
+      if (!this.samePoint(last, this.roomDraftPoint)) {
+        points.push({ ...this.roomDraftPoint });
+      }
+    }
+    if (points.length < 3) {
+      this.setSaveState('idle', 'Add another corner to create a room.');
+      return;
+    }
+    const first = points[0];
+    const last = points[points.length - 1];
+    if (!this.samePoint(first, last)) {
+      points.push({ ...first });
+    }
+    const footprint = points.slice(0, points.length - 1);
+    const areaMm2 = Math.abs(this.polygonArea(footprint));
+    this.pushUndoState('room create');
+    const newWallIds: string[] = [];
+    for (let i = 0; i < points.length - 1; i++) {
+      const a = points[i];
+      const b = points[i + 1];
+      if (this.samePoint(a, b)) {
+        continue;
+      }
+      const base: Wall = {
+        id: this.uid(),
+        a: { ...a },
+        b: { ...b },
+        thickness: this.wallThickness,
+        height: this.wallHeight,
+        openings: [],
+        type: this.currentWallType,
+        offset: 0
+      };
+      const segments = this.splitAgainstAllWalls(base);
+      if (segments.length) {
+        segments.forEach(segment => newWallIds.push(segment.id));
+        this.walls.push(...segments);
+      }
+    }
+    if (newWallIds.length) {
+      this.mergeNearbyNodes();
+      this.rebuildMeshes();
+      this.invalidate3dCache();
+    }
+    let minX = Number.POSITIVE_INFINITY;
+    let minY = Number.POSITIVE_INFINITY;
+    let maxX = Number.NEGATIVE_INFINITY;
+    let maxY = Number.NEGATIVE_INFINITY;
+    footprint.forEach(point => {
+      minX = Math.min(minX, point.x);
+      minY = Math.min(minY, point.y);
+      maxX = Math.max(maxX, point.x);
+      maxY = Math.max(maxY, point.y);
+    });
+    const roomId = this.uid();
+    this.rooms.push({
+      id: roomId,
+      x: minX,
+      y: minY,
+      w: Math.max(0, maxX - minX),
+      h: Math.max(0, maxY - minY),
+      height: 3000
+    });
     this.creating = false;
+    this.roomPath = [];
+    this.roomDraftPoint = null;
+    this.roomClosePreview = false;
     this.draftA = null;
     this.draftB = null;
+    const areaLabel = this.formatArea(areaMm2);
+    this.setSaveState('success', `Room created (${areaLabel}).`);
   }
 
   private addWallSegment(target: Point): void {
     if(!this.draftA){ return; }
     const resolved = this.resolveWallPoint(target);
     if(this.samePoint(this.draftA, resolved)){ return; }
-    const base: Wall = { id:this.uid(), a:this.draftA, b:resolved, thickness:this.wallThickness, height:this.wallHeight, openings:[] };
+    const base: Wall = {
+      id: this.uid(),
+      a: this.draftA,
+      b: resolved,
+      thickness: this.wallThickness,
+      height: this.wallHeight,
+      openings: [],
+      type: this.currentWallType,
+      offset: 0
+    };
     const newSegs = this.splitAgainstAllWalls(base);
     if(newSegs.length === 0){ return; }
     this.walls.push(...newSegs);
@@ -1167,18 +1552,23 @@ export class DesignStudioPage implements OnInit, OnDestroy {
     const maxY = Math.max(w.a.y, w.b.y) + half;
     return { minX, minY, maxX, maxY };
   }
-  private wallOutlineCorners(w: Wall): [Point, Point, Point, Point] {
+  private wallOutlineCornersWithParams(w: Wall, thickness: number, offset: number): [Point, Point, Point, Point] {
     const dir = this.unitVector(w.a, w.b);
     const normal = { x: -dir.y, y: dir.x };
-    const half = w.thickness / 2;
+    const baseA = { x: w.a.x + normal.x * offset, y: w.a.y + normal.y * offset };
+    const baseB = { x: w.b.x + normal.x * offset, y: w.b.y + normal.y * offset };
+    const half = thickness / 2;
     const offsetX = normal.x * half;
     const offsetY = normal.y * half;
     return [
-      { x: w.a.x + offsetX, y: w.a.y + offsetY },
-      { x: w.b.x + offsetX, y: w.b.y + offsetY },
-      { x: w.b.x - offsetX, y: w.b.y - offsetY },
-      { x: w.a.x - offsetX, y: w.a.y - offsetY }
+      { x: baseA.x + offsetX, y: baseA.y + offsetY },
+      { x: baseB.x + offsetX, y: baseB.y + offsetY },
+      { x: baseB.x - offsetX, y: baseB.y - offsetY },
+      { x: baseA.x - offsetX, y: baseA.y - offsetY }
     ];
+  }
+  private wallOutlineCorners(w: Wall): [Point, Point, Point, Point] {
+    return this.wallOutlineCornersWithParams(w, w.thickness, w.offset ?? 0);
   }
   wallOutlinePath(w: Wall): string {
     const corners = this.wallOutlineCorners(w);
@@ -1884,16 +2274,41 @@ export class DesignStudioPage implements OnInit, OnDestroy {
     const uniform = walls.every(w => Math.abs(w.height - first) < 0.5);
     return uniform ? first : null;
   }
+
+  get selectedWallOrientation(): { angle: number; classification: 'horizontal'|'vertical'|'diagonal'; bearing: string } | null {
+    const wall = this.selectedWall;
+    if (!wall) {
+      return null;
+    }
+    const angle = this.wallAngleDegrees(wall);
+    return {
+      angle,
+      classification: this.classifyWallAngle(angle),
+      bearing: this.bearingFromAngle(angle)
+    };
+  }
+  get selectedWallsTypeValue(): WallType | null {
+    const walls = this.selectedWalls;
+    if (!walls.length) {
+      return null;
+    }
+    const first = walls[0].type;
+    const uniform = walls.every(w => w.type === first);
+    return uniform ? first : null;
+  }
   onSelectedWallsThicknessInput(value: string): void {
     if (!this.selectedWalls.length) {
       return;
     }
     const parsed = Number(value);
     if (!Number.isFinite(parsed)) {
+      this.pendingThickness = null;
+      this.thicknessPreviewPaths = [];
       return;
     }
     const thickness = Math.max(40, Math.round(parsed));
-    this.applySelectedWallsThickness(thickness);
+    this.pendingThickness = thickness;
+    this.updateThicknessPreview(thickness, this.thicknessAnchor);
   }
   onSelectedWallsHeightInput(value: string): void {
     if (!this.selectedWalls.length) {
@@ -1906,12 +2321,81 @@ export class DesignStudioPage implements OnInit, OnDestroy {
     const height = Math.max(1000, Math.round(parsed));
     this.applySelectedWallsHeight(height);
   }
-  private applySelectedWallsThickness(thickness: number): void {
+  onThicknessPresetChange(value: string): void {
+    if (!value) {
+      return;
+    }
+    const preset = Number(value);
+    if (!Number.isFinite(preset)) {
+      return;
+    }
+    this.pendingThickness = Math.max(40, Math.round(preset));
+    this.updateThicknessPreview(this.pendingThickness, this.thicknessAnchor);
+  }
+  setThicknessAnchor(anchor: 'center'|'left'|'right'): void {
+    this.thicknessAnchor = anchor;
+    if (this.pendingThickness !== null) {
+      this.updateThicknessPreview(this.pendingThickness, anchor);
+    }
+  }
+  applyPendingThickness(): void {
+    if (this.pendingThickness === null) {
+      return;
+    }
+    this.applySelectedWallsThickness(this.pendingThickness, this.thicknessAnchor);
+    this.pendingThickness = null;
+    this.thicknessPreviewPaths = [];
+  }
+  cancelThicknessPreview(): void {
+    this.pendingThickness = null;
+    this.thicknessPreviewPaths = [];
+  }
+  applyStandardHeight(value: string): void {
+    if (!value) {
+      return;
+    }
+    const preset = Number(value);
+    if (!Number.isFinite(preset)) {
+      return;
+    }
+    const height = Math.max(1000, Math.round(preset));
+    this.applySelectedWallsHeight(height);
+  }
+  private updateThicknessPreview(thickness: number, anchor: 'center'|'left'|'right'): void {
+    const walls = this.selectedWalls;
+    if (!walls.length) {
+      this.thicknessPreviewPaths = [];
+      return;
+    }
+    this.thicknessPreviewPaths = walls.map(wall => {
+      const offset = this.computeOffsetForAnchor(wall, thickness, anchor);
+      const corners = this.wallOutlineCornersWithParams(wall, thickness, offset);
+      const path = `M ${corners[0].x} ${corners[0].y} L ${corners[1].x} ${corners[1].y} L ${corners[2].x} ${corners[2].y} L ${corners[3].x} ${corners[3].y} Z`;
+      return { id: wall.id, path };
+    });
+  }
+  private computeOffsetForAnchor(wall: Wall, thickness: number, anchor: 'center'|'left'|'right'): number {
+    const oldHalf = wall.thickness / 2;
+    const newHalf = thickness / 2;
+    const oldOffset = wall.offset ?? 0;
+    if (anchor === 'center') {
+      return 0;
+    }
+    if (anchor === 'left') {
+      return oldOffset + (oldHalf - newHalf);
+    }
+    return oldOffset - (oldHalf - newHalf);
+  }
+  private applySelectedWallsThickness(thickness: number, anchor: 'center'|'left'|'right', recordUndo = true): void {
     const walls = this.selectedWalls;
     if (!walls.length) {
       return;
     }
+    if (recordUndo) {
+      this.pushUndoState('wall thickness change');
+    }
     walls.forEach(wall => {
+      wall.offset = this.computeOffsetForAnchor(wall, thickness, anchor);
       wall.thickness = thickness;
     });
     this.wallThickness = thickness;
@@ -1922,13 +2406,14 @@ export class DesignStudioPage implements OnInit, OnDestroy {
     }
     this.updateSelectedWallPoint();
     const label = this.selectedWallIds.length > 1 ? `${this.selectedWallIds.length} walls` : 'Wall';
-    this.setSaveState('idle', `${label} thickness set to ${thickness} mm.`);
+    this.setSaveState('idle', `${label} thickness set to ${thickness} mm (${anchor}).`);
   }
   private applySelectedWallsHeight(height: number): void {
     const walls = this.selectedWalls;
     if (!walls.length) {
       return;
     }
+    this.pushUndoState('wall height change');
     walls.forEach(wall => {
       wall.height = height;
     });
@@ -1941,6 +2426,25 @@ export class DesignStudioPage implements OnInit, OnDestroy {
     this.updateSelectedWallPoint();
     const label = this.selectedWallIds.length > 1 ? `${this.selectedWallIds.length} walls` : 'Wall';
     this.setSaveState('idle', `${label} height set to ${height} mm.`);
+  }
+  setWallType(type: WallType): void {
+    this.currentWallType = type;
+    const walls = this.selectedWalls;
+    if (!walls.length) {
+      this.setSaveState('idle', `New walls will default to ${type} type.`);
+      return;
+    }
+    this.pushUndoState('wall type change');
+    walls.forEach(wall => {
+      wall.type = type;
+    });
+    this.rebuildMeshes();
+    this.invalidate3dCache();
+    if (this.viewPort === '3d') {
+      this.scheduleFrame();
+    }
+    const label = walls.length > 1 ? `${walls.length} walls` : 'Wall';
+    this.setSaveState('idle', `${label} set to ${type} type.`);
   }
   private syncPrimarySelection(preferredId?: string | null): void {
     if (preferredId && this.selectedWallIds.includes(preferredId)) {
@@ -1976,7 +2480,11 @@ export class DesignStudioPage implements OnInit, OnDestroy {
     return { left: `${left}px`, top: `${top}px` };
   }
   private updateSelectedWallPoint(){
-    if(!this.selectedWallId || this.selectedWallT===null){ this.selectedWallPoint=null; return; }
+    if(!this.selectedWallId || this.selectedWallT===null){
+      this.selectedWallPoint=null;
+      this.refreshSplitHints();
+      return;
+    }
     const wall = this.selectedWall;
     if(!wall){
       this.selectedWallIds = this.selectedWallIds.filter(id => id !== this.selectedWallId);
@@ -1984,6 +2492,7 @@ export class DesignStudioPage implements OnInit, OnDestroy {
       this.selectedWallPoint = null;
       this.selectedWallT = null;
       this.syncPrimarySelection();
+      this.refreshSplitHints();
       return;
     }
     const t = Math.max(0, Math.min(1, this.selectedWallT));
@@ -1991,6 +2500,583 @@ export class DesignStudioPage implements OnInit, OnDestroy {
       x: wall.a.x + (wall.b.x - wall.a.x) * t,
       y: wall.a.y + (wall.b.y - wall.a.y) * t
     };
+    this.refreshSplitHints();
+  }
+  private refreshSplitHints(): void {
+    if (!this.manualSplitActive) {
+      this.splitHints = [];
+      this.manualSplitPreview = null;
+      this.activeSplitHintId = null;
+      return;
+    }
+    if (this.selectedWallIds.length !== 1) {
+      this.splitHints = [];
+      this.manualSplitPreview = null;
+      this.activeSplitHintId = null;
+      this.manualSplitActive = false;
+      return;
+    }
+    const wall = this.selectedWall;
+    if (!wall) {
+      this.splitHints = [];
+      this.manualSplitPreview = null;
+      this.activeSplitHintId = null;
+      this.manualSplitActive = false;
+      return;
+    }
+    const length = this.segLen(wall.a, wall.b);
+    if (length < 1e-3) {
+      this.splitHints = [];
+      this.activeSplitHintId = null;
+      this.manualSplitActive = false;
+      return;
+    }
+    const fractions = [0.25, 0.5, 0.75, 1 / 3, 2 / 3];
+    const hints: SplitHint[] = [];
+    const seen = new Set<number>();
+    fractions.forEach(frac => {
+      if (frac <= this.intersectionEpsilon || frac >= 1 - this.intersectionEpsilon) {
+        return;
+      }
+      const key = Number(frac.toFixed(4));
+      if (seen.has(key)) {
+        return;
+      }
+      seen.add(key);
+      hints.push({
+        id: `fraction-${key}`,
+        t: frac,
+        point: {
+          x: wall.a.x + (wall.b.x - wall.a.x) * frac,
+          y: wall.a.y + (wall.b.y - wall.a.y) * frac
+        },
+        offset: length * frac,
+        fromEnd: length * (1 - frac)
+      });
+    });
+    hints.sort((a, b) => a.t - b.t);
+    this.splitHints = hints;
+    const focusT =
+      this.manualSplitPreview && this.manualSplitPreview.wallId === wall.id
+        ? this.manualSplitPreview.t
+        : this.selectedWallT;
+    this.updateActiveSplitHint(focusT ?? null);
+  }
+  private updateActiveSplitHint(t: number | null): void {
+    if (!this.manualSplitActive || !this.splitHints.length || t === null) {
+      this.activeSplitHintId = null;
+      return;
+    }
+    let best: SplitHint | null = null;
+    let bestDelta = Number.POSITIVE_INFINITY;
+    for (const hint of this.splitHints) {
+      const delta = Math.abs(hint.t - t);
+      if (delta < 0.03 && delta < bestDelta) {
+        best = hint;
+        bestDelta = delta;
+      }
+    }
+    this.activeSplitHintId = best ? best.id : null;
+  }
+  private manualSplitTolerance(wall: Wall): number {
+    return Math.max(24, wall.thickness);
+  }
+  private snapManualSplitParam(wall: Wall, t: number): number {
+    const length = this.segLen(wall.a, wall.b);
+    if (length < 1e-3) {
+      return Math.max(0, Math.min(1, t));
+    }
+    const clamped = Math.max(0, Math.min(1, t));
+    let bestT = clamped;
+    let bestScore = Number.POSITIVE_INFINITY;
+    const offset = clamped * length;
+    const grid = this.gridSpacing;
+    if (grid > 0) {
+      const snappedOffset = Math.round(offset / grid) * grid;
+      const gridDelta = Math.abs(snappedOffset - offset);
+      const gridTolerance = grid * 0.15;
+      if (gridDelta <= gridTolerance && gridDelta < bestScore) {
+        bestScore = gridDelta;
+        bestT = Math.max(0, Math.min(1, snappedOffset / length));
+      }
+    }
+    const fractions = [0.25, 0.5, 0.75, 1 / 3, 2 / 3];
+    const fractionTolerance = Math.min(120, length * 0.04);
+    fractions.forEach(frac => {
+      if (frac <= this.intersectionEpsilon || frac >= 1 - this.intersectionEpsilon) {
+        return;
+      }
+      const targetOffset = frac * length;
+      const delta = Math.abs(targetOffset - offset);
+      if (delta <= fractionTolerance && delta < bestScore) {
+        bestScore = delta;
+        bestT = frac;
+      }
+    });
+    return Math.max(0, Math.min(1, bestT));
+  }
+  private wallHasNodeAtParam(wall: Wall, t: number): boolean {
+    const point = {
+      x: wall.a.x + (wall.b.x - wall.a.x) * t,
+      y: wall.a.y + (wall.b.y - wall.a.y) * t
+    };
+    const tolerance = Math.max(6, wall.thickness * 0.25);
+    return this.wallHandlesList.some(node => {
+      if (!node.anchors.some(anchor => anchor.wall.id === wall.id)) {
+        return false;
+      }
+      return this.dist(node.point, point) <= tolerance;
+    });
+  }
+  private includeCompositeMembers(wallId: string | null): void {
+    if (!wallId) {
+      return;
+    }
+    const wall = this.walls.find(w => w.id === wallId);
+    if (!wall?.compositeId) {
+      return;
+    }
+    const composite = this.curveComposites.get(wall.compositeId);
+    if (!composite) {
+      return;
+    }
+    const all = new Set(this.selectedWallIds);
+    composite.segmentIds.forEach(id => all.add(id));
+    this.selectedWallIds = Array.from(all);
+  }
+  private curveCompositeForWall(wallId: string | Wall | null): CurveComposite | null {
+    if (!wallId) {
+      return null;
+    }
+    const wall = typeof wallId === 'string' ? this.walls.find(w => w.id === wallId) : wallId;
+    if (!wall?.compositeId) {
+      return null;
+    }
+    const composite = this.curveComposites.get(wall.compositeId);
+    return composite ?? null;
+  }
+  private circleFromThreePoints(a: Point, b: Point, c: Point): { center: Point; radius: number } | null {
+    const d =
+      2 *
+      (a.x * (b.y - c.y) +
+        b.x * (c.y - a.y) +
+        c.x * (a.y - b.y));
+    if (Math.abs(d) < 1e-6) {
+      return null;
+    }
+    const aSq = a.x * a.x + a.y * a.y;
+    const bSq = b.x * b.x + b.y * b.y;
+    const cSq = c.x * c.x + c.y * c.y;
+    const ux =
+      (aSq * (b.y - c.y) +
+        bSq * (c.y - a.y) +
+        cSq * (a.y - b.y)) /
+      d;
+    const uy =
+      (aSq * (c.x - b.x) +
+        bSq * (a.x - c.x) +
+        cSq * (b.x - a.x)) /
+      d;
+    const center = { x: ux, y: uy };
+    const radius = Math.hypot(a.x - ux, a.y - uy);
+    if (!Number.isFinite(radius) || radius < 1) {
+      return null;
+    }
+    return { center, radius };
+  }
+  private orientedArea(a: Point, b: Point, c: Point): number {
+    return (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x);
+  }
+  private computeArcAngles(
+    center: Point,
+    start: Point,
+    control: Point,
+    end: Point
+  ): { startAngle: number; endAngle: number; controlAngle: number; clockwise: boolean; sweep: number } | null {
+    const startAngle = this.normalizeAngle(Math.atan2(start.y - center.y, start.x - center.x));
+    let controlAngle = this.normalizeAngle(Math.atan2(control.y - center.y, control.x - center.x));
+    let endAngle = this.normalizeAngle(Math.atan2(end.y - center.y, end.x - center.x));
+    const clockwise = this.orientedArea(start, control, end) < 0;
+    const twoPi = Math.PI * 2;
+    const adjust = (angle: number, reference: number, cw: boolean): number => {
+      let result = angle;
+      if (cw) {
+        while (result > reference) {
+          result -= twoPi;
+        }
+        while (result <= reference - twoPi) {
+          result += twoPi;
+        }
+      } else {
+        while (result < reference) {
+          result += twoPi;
+        }
+        while (result >= reference + twoPi) {
+          result -= twoPi;
+        }
+      }
+      return result;
+    };
+    controlAngle = adjust(controlAngle, startAngle, clockwise);
+    endAngle = adjust(endAngle, controlAngle, clockwise);
+    if (clockwise && endAngle >= startAngle) {
+      endAngle -= twoPi;
+    }
+    if (!clockwise && endAngle <= startAngle) {
+      endAngle += twoPi;
+    }
+    const sweep = clockwise ? startAngle - endAngle : endAngle - startAngle;
+    if (!Number.isFinite(sweep) || sweep <= 1e-3) {
+      return null;
+    }
+    // ensure control lies on arc span
+    if (clockwise) {
+      if (!(controlAngle <= startAngle + 1e-6 && controlAngle >= endAngle - 1e-6)) {
+        return null;
+      }
+    } else if (!(controlAngle >= startAngle - 1e-6 && controlAngle <= endAngle + 1e-6)) {
+      return null;
+    }
+    return { startAngle, endAngle, controlAngle, clockwise, sweep };
+  }
+  private sampleArcPoints(
+    center: Point,
+    radius: number,
+    startAngle: number,
+    endAngle: number,
+    clockwise: boolean,
+    closed = false
+  ): Point[] {
+    const span = Math.abs(clockwise ? startAngle - endAngle : endAngle - startAngle);
+    const steps = Math.max(6, Math.ceil(span / (Math.PI / 18)));
+    const points: Point[] = [];
+    for (let i = 0; i <= steps; i++) {
+      const t = i / steps;
+      const angle = clockwise ? startAngle - span * t : startAngle + span * t;
+      points.push({
+        x: center.x + radius * Math.cos(angle),
+        y: center.y + radius * Math.sin(angle)
+      });
+    }
+    if (closed) {
+      points.pop();
+    }
+    return points;
+  }
+  private computeCurveGeometry(
+    start: Point,
+    control: Point,
+    end: Point
+  ): {
+    center: Point;
+    radius: number;
+    startAngle: number;
+    endAngle: number;
+    controlAngle: number;
+    clockwise: boolean;
+    sweep: number;
+    closed: boolean;
+    samplePoints: Point[];
+  } | null {
+    const circle = this.circleFromThreePoints(start, control, end);
+    if (!circle) {
+      return null;
+    }
+    const { center, radius } = circle;
+    const angles = this.computeArcAngles(center, start, control, end);
+    if (!angles) {
+      return null;
+    }
+    const { startAngle, endAngle, controlAngle, clockwise, sweep } = angles;
+    const closed = Math.abs(sweep - Math.PI * 2) < 1e-2;
+    const samplePoints = this.sampleArcPoints(center, radius, startAngle, endAngle, clockwise, closed);
+    if (samplePoints.length < (closed ? 3 : 2)) {
+      return null;
+    }
+    return { center, radius, startAngle, endAngle, controlAngle, clockwise, sweep, closed, samplePoints };
+  }
+  private buildCurveComposite(
+    start: Point,
+    control: Point,
+    end: Point,
+    base: { thickness: number; height: number; type: WallType; offset: number; openings?: Opening[] }
+  ): { composite: CurveComposite; segments: Wall[] } | null {
+    const geometry = this.computeCurveGeometry(start, control, end);
+    if (!geometry) {
+      return null;
+    }
+    const { center, radius, startAngle, endAngle, clockwise, sweep, closed, samplePoints } = geometry;
+    const compositeId = this.uid();
+    const segments: Wall[] = [];
+    const totalSegments = closed ? samplePoints.length : samplePoints.length - 1;
+    const createWall = (a: Point, b: Point, t0: number, t1: number): Wall => ({
+      id: this.uid(),
+      a: { ...a },
+      b: { ...b },
+      thickness: base.thickness,
+      height: base.height,
+      openings: [],
+      type: base.type,
+      offset: base.offset ?? 0,
+      compositeId,
+      compositeT0: t0,
+      compositeT1: t1
+    });
+    for (let i = 0; i < samplePoints.length - 1; i++) {
+      const t0 = i / totalSegments;
+      const t1 = (i + 1) / totalSegments;
+      segments.push(createWall(samplePoints[i], samplePoints[i + 1], t0, t1));
+    }
+    if (closed) {
+      const last = samplePoints[samplePoints.length - 1];
+      const first = samplePoints[0];
+      segments.push(createWall(last, first, (samplePoints.length - 1) / totalSegments, 1));
+    }
+    if (base.openings && base.openings.length > 0) {
+      const arcLength = radius * sweep;
+      const assignOpening = (opening: Opening) => {
+        const fraction = opening.offset / arcLength;
+        for (const segment of segments) {
+          const segLength = this.segLen(segment.a, segment.b);
+          if (fraction >= (segment.compositeT0 ?? 0) && fraction <= (segment.compositeT1 ?? 0) + 1e-4) {
+            const local = (fraction - (segment.compositeT0 ?? 0)) / ((segment.compositeT1 ?? 0) - (segment.compositeT0 ?? 0));
+            const offset = local * segLength;
+            segment.openings.push({ ...opening, offset });
+            return;
+          }
+        }
+      };
+      base.openings.forEach(assignOpening);
+    }
+    const composite: CurveComposite = {
+      id: compositeId,
+      segmentIds: segments.map(seg => seg.id),
+      center,
+      radius,
+      startAngle,
+      endAngle,
+      clockwise,
+      control: { ...control },
+      closed,
+      samplePoints: segments.map(seg => seg.a).concat(segments.slice(-1).map(seg => seg.b))
+    };
+    return { composite, segments };
+  }
+  private registerCurveComposite(composite: CurveComposite, segments: Wall[]): void {
+    this.curveComposites.set(composite.id, composite);
+    this.walls.push(...segments);
+  }
+  private removeCurveComposite(id: string): void {
+    const composite = this.curveComposites.get(id);
+    if (!composite) {
+      return;
+    }
+    const segmentSet = new Set(composite.segmentIds);
+    this.walls = this.walls.filter(wall => !segmentSet.has(wall.id));
+    this.curveComposites.delete(id);
+  }
+  changeMode(next: 'select'|'pan'|'wall'|'room'|'door'|'window'): void {
+    if (this.mode === 'measure') {
+      this.toggleMeasureMode(false);
+    }
+    if (this.mode === 'room' && this.creating) {
+      this.creating = false;
+      this.roomPath = [];
+      this.roomDraftPoint = null;
+      this.roomClosePreview = false;
+    }
+    this.curveDraft = null;
+    this.curvePreview = null;
+    this.mode = next;
+    if (next === 'room') {
+      this.setSaveState('idle', 'Room tool ready. Click to lay out corners.');
+    }
+  }
+  activateCurveMode(): void {
+    this.mode = 'curve';
+    this.curveDraft = { kind: 'create', stage: 'start' };
+    this.curvePreview = null;
+    this.setSaveState('idle', 'Curve tool active. Click a start point.');
+  }
+  private resetCurveDraft(nextMode: 'stay'|'select' = 'stay'): void {
+    this.curveDraft = nextMode === 'stay' ? { kind: 'create', stage: 'start' } : null;
+    this.curvePreview = null;
+    if (nextMode === 'select') {
+      this.mode = 'select';
+    }
+  }
+  curvePreviewPath(): string {
+    if (!this.curvePreview || this.curvePreview.points.length < 2) {
+      return '';
+    }
+    const pts = this.curvePreview.points;
+    const commands = [`M ${pts[0].x} ${pts[0].y}`];
+    for (let i = 1; i < pts.length; i++) {
+      commands.push(`L ${pts[i].x} ${pts[i].y}`);
+    }
+    return commands.join(' ');
+  }
+  private updateCurvePreview(point: Point): void {
+    if (!this.curveDraft) {
+      this.curvePreview = null;
+      return;
+    }
+    if (this.curveDraft.kind === 'create') {
+      if (this.curveDraft.stage === 'start' || !this.curveDraft.start) {
+        this.curvePreview = null;
+        return;
+      }
+      if (this.curveDraft.stage === 'control') {
+        const start = this.curveDraft.start;
+        this.curvePreview = {
+          points: [start, { ...point }],
+          center: { x: (start.x + point.x) / 2, y: (start.y + point.y) / 2 },
+          radius: this.segLen(start, point) / 2,
+          startAngle: 0,
+          endAngle: 0,
+          clockwise: false
+        };
+        return;
+      }
+      if (this.curveDraft.stage === 'end' && this.curveDraft.control) {
+        const geometry = this.computeCurveGeometry(this.curveDraft.start, this.curveDraft.control, point);
+        if (!geometry) {
+          this.curvePreview = null;
+          return;
+        }
+        this.curvePreview = {
+          points: geometry.samplePoints,
+          center: geometry.center,
+          radius: geometry.radius,
+          startAngle: geometry.startAngle,
+          endAngle: geometry.endAngle,
+          clockwise: geometry.clockwise
+        };
+      }
+      return;
+    }
+    if (this.curveDraft.kind === 'convert') {
+      const geometry = this.computeCurveGeometry(this.curveDraft.start, point, this.curveDraft.end);
+      if (!geometry) {
+        this.curvePreview = null;
+        return;
+      }
+      this.curvePreview = {
+        points: geometry.samplePoints,
+        center: geometry.center,
+        radius: geometry.radius,
+        startAngle: geometry.startAngle,
+        endAngle: geometry.endAngle,
+        clockwise: geometry.clockwise
+      };
+    }
+  }
+  private handleCurveClick(point: Point): void {
+    const resolvedPoint = this.resolveGenericPoint(point);
+    if (!this.curveDraft) {
+      this.curveDraft = { kind: 'create', stage: 'start' };
+    }
+    if (this.curveDraft.kind === 'create') {
+      if (this.curveDraft.stage === 'start') {
+        this.curveDraft = { kind: 'create', stage: 'control', start: { ...resolvedPoint } };
+        this.curvePreview = null;
+        this.setSaveState('idle', 'Curve tool: choose an arc point.');
+        return;
+      }
+      if (this.curveDraft.stage === 'control' && this.curveDraft.start) {
+        this.curveDraft = {
+          kind: 'create',
+          stage: 'end',
+          start: this.curveDraft.start,
+          control: { ...resolvedPoint }
+        };
+        this.updateCurvePreview(resolvedPoint);
+        this.setSaveState('idle', 'Curve tool: choose an end point.');
+        return;
+      }
+      if (this.curveDraft.stage === 'end' && this.curveDraft.start && this.curveDraft.control) {
+        const start = this.curveDraft.start;
+        const control = this.curveDraft.control;
+        const end = resolvedPoint;
+        const radius = this.finalizeCurveCreation(start, control, end);
+        if (radius === null) {
+          this.setSaveState('error', 'Unable to create curve. Pick non-colinear points.');
+        } else {
+          this.setSaveState('success', `Curve created (radius ${this.formatLength(radius)}).`);
+        }
+        this.resetCurveDraft('stay');
+        return;
+      }
+    } else if (this.curveDraft.kind === 'convert') {
+      const start = this.curveDraft.start;
+      const end = this.curveDraft.end;
+      const radius = this.finalizeCurveConversion(this.curveDraft.wallId, start, resolvedPoint, end);
+      if (radius === null) {
+        this.setSaveState('error', 'Unable to convert wall to curve. Pick a different arc point.');
+      } else {
+        this.setSaveState('success', `Wall converted to curve (radius ${this.formatLength(radius)}).`);
+      }
+      this.resetCurveDraft('select');
+      return;
+    }
+  }
+  private finalizeCurveCreation(start: Point, control: Point, end: Point): number | null {
+    const base = {
+      thickness: this.wallThickness,
+      height: this.wallHeight,
+      type: this.currentWallType,
+      offset: 0
+    };
+    const built = this.buildCurveComposite(start, control, end, base);
+    if (!built) {
+      return null;
+    }
+    this.pushUndoState('curve wall create');
+    this.registerCurveComposite(built.composite, built.segments);
+    this.mergeNearbyNodes();
+    this.rebuildMeshes();
+    this.invalidate3dCache();
+    this.selectedRoomId = null;
+    this.selectedWallIds = [...built.composite.segmentIds];
+    this.selectedWallId = built.composite.segmentIds[built.composite.segmentIds.length - 1];
+    this.selectedWallT = 1;
+    this.updateSelectedWallPoint();
+    this.refreshSplitHints();
+    return built.composite.radius;
+  }
+  private finalizeCurveConversion(wallId: string, start: Point, control: Point, end: Point): number | null {
+    const wall = this.walls.find(w => w.id === wallId);
+    if (!wall) {
+      return null;
+    }
+    if (wall.compositeId) {
+      this.setSaveState('error', 'Curve conversion requires a straight wall.');
+      return null;
+    }
+    const base = {
+      thickness: wall.thickness,
+      height: wall.height,
+      type: wall.type,
+      offset: wall.offset ?? 0,
+      openings: wall.openings.map(opening => ({ ...opening }))
+    };
+    const built = this.buildCurveComposite(start, control, end, base);
+    if (!built) {
+      return null;
+    }
+    this.pushUndoState('convert wall to curve');
+    this.walls = this.walls.filter(w => w.id !== wallId);
+    this.registerCurveComposite(built.composite, built.segments);
+    this.mergeNearbyNodes();
+    this.rebuildMeshes();
+    this.invalidate3dCache();
+    this.selectedRoomId = null;
+    this.selectedWallIds = [...built.composite.segmentIds];
+    this.selectedWallId = built.composite.segmentIds[built.composite.segmentIds.length - 1];
+    this.selectedWallT = 1;
+    this.updateSelectedWallPoint();
+    this.refreshSplitHints();
+    return built.composite.radius;
   }
   private selectionBounds(): Bounds | null {
     if (this.selectedWallIds.length > 1) {
@@ -2555,6 +3641,31 @@ export class DesignStudioPage implements OnInit, OnDestroy {
     return result;
   }
 
+  private wallAngleDegrees(wall: Wall): number {
+    const angle = Math.atan2(wall.b.y - wall.a.y, wall.b.x - wall.a.x);
+    return (this.normalizeAngle(angle) * 180) / Math.PI;
+  }
+
+  private classifyWallAngle(angleDeg: number): 'horizontal' | 'vertical' | 'diagonal' {
+    const normalized = angleDeg % 180;
+    const deltaHorizontal = Math.min(normalized, 180 - normalized);
+    const deltaVertical = Math.abs(90 - normalized);
+    const threshold = 7.5;
+    if (deltaHorizontal <= threshold) {
+      return 'horizontal';
+    }
+    if (deltaVertical <= threshold) {
+      return 'vertical';
+    }
+    return 'diagonal';
+  }
+
+  private bearingFromAngle(angleDeg: number): string {
+    const bearings = ['E', 'NE', 'N', 'NW', 'W', 'SW', 'S', 'SE'];
+    const index = Math.round(angleDeg / 45) % bearings.length;
+    return bearings[index];
+  }
+
   private describeAngleArc(cx: number, cy: number, radius: number, start: number, end: number): string {
     const normalizedStart = this.normalizeAngle(start);
     let sweep = this.normalizeAngle(end) - normalizedStart;
@@ -2603,6 +3714,51 @@ export class DesignStudioPage implements OnInit, OnDestroy {
   private samePoint(a:Point,b:Point){ return this.dist(a,b) < 1; }
   private dist(a:Point,b:Point){ const dx=b.x-a.x, dy=b.y-a.y; return Math.hypot(dx,dy); }
 
+  private polygonArea(points: Point[]): number {
+    if (points.length < 3) {
+      return 0;
+    }
+    let area = 0;
+    for (let i = 0; i < points.length; i++) {
+      const current = points[i];
+      const next = points[(i + 1) % points.length];
+      area += current.x * next.y - next.x * current.y;
+    }
+    return area / 2;
+  }
+
+  private polygonCentroid(points: Point[]): Point {
+    const area = this.polygonArea(points);
+    if (Math.abs(area) < 1e-6) {
+      return { x: points[0]?.x ?? 0, y: points[0]?.y ?? 0 };
+    }
+    let cx = 0;
+    let cy = 0;
+    for (let i = 0; i < points.length; i++) {
+      const current = points[i];
+      const next = points[(i + 1) % points.length];
+      const cross = current.x * next.y - next.x * current.y;
+      cx += (current.x + next.x) * cross;
+      cy += (current.y + next.y) * cross;
+    }
+    const factor = 1 / (6 * area);
+    return { x: cx * factor, y: cy * factor };
+  }
+
+  formatArea(areaMm2: number): string {
+    if (!Number.isFinite(areaMm2) || areaMm2 <= 0) {
+      return '0 m²';
+    }
+    const areaMeters = areaMm2 / 1_000_000;
+    if (areaMeters >= 10) {
+      return `${areaMeters.toFixed(1)} m²`;
+    }
+    if (areaMeters >= 1) {
+      return `${areaMeters.toFixed(2)} m²`;
+    }
+    return `${(areaMeters * 10_000).toFixed(1)} cm²`;
+  }
+
   constructor(
     private auth: CoreAuthService,
     private studio: StudioService,
@@ -2637,8 +3793,8 @@ export class DesignStudioPage implements OnInit, OnDestroy {
     this.measurements = [];
     this.measureStart = null;
     this.measureDraft = null;
-    this.walls=m?.walls||[];
-    this.rooms=m?.rooms||[];
+    this.walls = (m?.walls ?? []).map((w: Wall) => this.normalizeWall(w));
+    this.rooms = (m?.rooms ?? []).map((r: Room) => ({ ...r }));
     const v=m?.view||{};
     this.minX=v.minX??this.minX;
     this.minY=v.minY??this.minY;
@@ -2767,17 +3923,6 @@ export class DesignStudioPage implements OnInit, OnDestroy {
       y: (this.draftA.y + this.draftB.y) / 2
     };
   }
-  draftRoomBounds(): { minX: number; minY: number; maxX: number; maxY: number } | null {
-    if (!(this.creating && this.mode === 'room' && this.draftA && this.draftB)) {
-      return null;
-    }
-    return {
-      minX: Math.min(this.draftA.x, this.draftB.x),
-      minY: Math.min(this.draftA.y, this.draftB.y),
-      maxX: Math.max(this.draftA.x, this.draftB.x),
-      maxY: Math.max(this.draftA.y, this.draftB.y)
-    };
-  }
   measurementDraftLength(): number {
     if (!(this.mode === 'measure' && this.measureStart && this.measureDraft)) {
       return 0;
@@ -2838,40 +3983,58 @@ export class DesignStudioPage implements OnInit, OnDestroy {
 
   splitSelectedWall(): void {
     if (this.selectedWallIds.length !== 1) {
+      this.manualSplitActive = false;
+      this.manualSplitPreview = null;
+      this.splitHints = [];
+      this.activeSplitHintId = null;
       this.setSaveState('idle', 'Select a single wall to split.');
+      this.refreshSplitHints();
       return;
     }
-    const result = this.ensureNodeAtSelection();
-    if (!result) return;
-    if (result.created) {
-      this.setSaveState('idle', 'Wall split created. Drag the new handle or branch from here.');
-    } else {
-      this.setSaveState('idle', 'Select a point along the wall to split.');
+    if (this.manualSplitActive) {
+      this.manualSplitActive = false;
+      this.manualSplitPreview = null;
+      this.splitHints = [];
+      this.activeSplitHintId = null;
+      this.setSaveState('idle', 'Split mode cancelled.');
+      this.refreshSplitHints();
+      return;
     }
+    this.manualSplitActive = true;
+    this.manualSplitPreview = null;
+    this.refreshSplitHints();
+    this.setSaveState('idle', 'Split mode on. Click along the wall to add a junction (Esc to cancel).');
   }
 
   curveSelectedWall(): void {
     if (this.selectedWallIds.length !== 1) {
-      this.setSaveState('idle', 'Select a single wall to curve.');
+      this.setSaveState('idle', 'Select a single wall to convert.');
       return;
     }
-    this.ensureNodeAtSelection();
     const wall = this.selectedWall;
-    if (!wall) return;
+    if (!wall) {
+      this.setSaveState('idle', 'Select a wall to convert.');
+      return;
+    }
+    if (wall.compositeId) {
+      this.setSaveState('idle', 'Wall is already part of a curve.');
+      return;
+    }
     const length = this.segLen(wall.a, wall.b);
-    if (length < 150) {
+    if (length < 200) {
       this.setSaveState('idle', 'Wall too short to curve.');
       return;
     }
-    const segments = this.splitWallAtPoints(wall, [0.5]);
-    this.replaceWallWithSegments(wall.id, segments);
-    const pivot = segments[0].b;
-    this.selectedWallIds = [segments[0].id];
-    this.selectedWallId = segments[0].id;
-    this.selectedWallT = 1;
-    this.selectedWallPoint = { x: pivot.x, y: pivot.y };
-    this.updateSelectedWallPoint();
-    this.setSaveState('idle', 'Midpoint added. Drag handles to shape a curve.');
+    this.mode = 'curve';
+    this.curveDraft = {
+      kind: 'convert',
+      stage: 'control',
+      wallId: wall.id,
+      start: { x: wall.a.x, y: wall.a.y },
+      end: { x: wall.b.x, y: wall.b.y }
+    };
+    this.curvePreview = null;
+    this.setSaveState('idle', 'Curve conversion: select an arc point to define the curve.');
   }
 
   branchFromSelectedWall(): void {
@@ -2883,6 +4046,8 @@ export class DesignStudioPage implements OnInit, OnDestroy {
     if (!result) return;
     const start = result.point;
     this.toolset = 'build';
+    this.curveDraft = null;
+    this.curvePreview = null;
     this.mode = 'wall';
     this.creating = true;
     this.wallPath = [start];
@@ -2897,14 +4062,47 @@ export class DesignStudioPage implements OnInit, OnDestroy {
     this.setSaveState('idle', 'Branching wall: click to add the next point.');
   }
 
-  deleteSelectedWall(): void {
-    if (this.selectedWallIds.length === 0) return;
-    const targets = new Set(this.selectedWallIds);
-    this.walls = this.walls.filter(w => !targets.has(w.id));
-    const removedCount = targets.size;
+  deleteSelectedWall(confirmDeletion = true): void {
+    if (this.selectedWallIds.length === 0) {
+      this.setSaveState('idle', 'Select walls to delete.');
+      return;
+    }
+    const targets = this.walls.filter(w => this.selectedWallIds.includes(w.id));
+    if (targets.length === 0) {
+      return;
+    }
+    if (confirmDeletion) {
+      const withOpenings = targets.filter(w => w.openings.length > 0);
+      if (withOpenings.length > 0) {
+        const message =
+          `${withOpenings.length} wall${withOpenings.length === 1 ? '' : 's'} contain openings. Delete anyway?`;
+        if (!window.confirm(message)) {
+          this.setSaveState('idle', 'Deletion cancelled.');
+          return;
+        }
+      }
+    }
+    const description = targets.length === 1 ? 'wall deletion' : `deletion of ${targets.length} walls`;
+    this.pushUndoState(description);
+    this.applyWallDeletion(new Set(targets.map(w => w.id)));
+  }
+
+  private applyWallDeletion(targetIds: Set<string>): void {
+    const expandedIds = new Set(targetIds);
+    this.curveComposites.forEach((composite, id) => {
+      if (composite.segmentIds.some(segId => targetIds.has(segId))) {
+        composite.segmentIds.forEach(segId => expandedIds.add(segId));
+        this.curveComposites.delete(id);
+      }
+    });
+    const removedCount = expandedIds.size;
+    if (removedCount === 0) {
+      return;
+    }
+    this.walls = this.walls.filter(w => !expandedIds.has(w.id));
     this.clearSelection();
-    this.setSaveState('idle', `${removedCount} wall${removedCount === 1 ? '' : 's'} removed.`);
     this.rebuildMeshes();
+    this.setSaveState('idle', `${removedCount} wall${removedCount === 1 ? '' : 's'} removed.`);
   }
 
   toggleMeasureMode(force?: boolean): void {
@@ -2946,14 +4144,8 @@ export class DesignStudioPage implements OnInit, OnDestroy {
   private rebuildMeshes(): void {
     const wallFaces: WallFace[] = [];
     for (const wall of this.walls) {
-      const dir = this.unitVector(wall.a, wall.b);
-      const normal = { x: -dir.y, y: dir.x };
-      const half = wall.thickness / 2;
-      const c1 = { x: wall.a.x + normal.x * half, y: wall.a.y + normal.y * half };
-      const c2 = { x: wall.b.x + normal.x * half, y: wall.b.y + normal.y * half };
-      const c3 = { x: wall.b.x - normal.x * half, y: wall.b.y - normal.y * half };
-      const c4 = { x: wall.a.x - normal.x * half, y: wall.a.y - normal.y * half };
-      wallFaces.push({ id: wall.id, wallId: wall.id, corners: [c1, c2, c3, c4] });
+      const corners = this.wallOutlineCorners(wall);
+      wallFaces.push({ id: wall.id, wallId: wall.id, corners });
     }
     const roomMeshes: RoomMesh[] = this.rooms.map(room => ({
       id: room.id,
@@ -2970,6 +4162,77 @@ export class DesignStudioPage implements OnInit, OnDestroy {
     if (this.viewPort === '3d') {
       this.scheduleFrame();
     }
+  }
+
+  private normalizeWall(raw: any): Wall {
+    const openings: Opening[] = Array.isArray(raw?.openings)
+      ? raw.openings.map((o: Opening) => ({ ...o }))
+      : [];
+    const type: WallType = raw?.type ?? 'interior';
+    const offset = typeof raw?.offset === 'number' ? raw.offset : 0;
+    return {
+      id: raw?.id ?? this.uid(),
+      a: { x: raw?.a?.x ?? 0, y: raw?.a?.y ?? 0 },
+      b: { x: raw?.b?.x ?? 0, y: raw?.b?.y ?? 0 },
+      thickness: Math.max(1, Math.round(raw?.thickness ?? this.wallThickness)),
+      height: Math.max(1000, Math.round(raw?.height ?? this.wallHeight)),
+      openings,
+      type,
+      offset
+    };
+  }
+
+  private cloneWalls(walls: Wall[]): Wall[] {
+    return walls.map(w => this.normalizeWall(w));
+  }
+
+  private cloneRooms(rooms: Room[]): Room[] {
+    return rooms.map(r => ({ ...r }));
+  }
+
+  private createSnapshot(description: string): StudioSnapshot {
+    return {
+      walls: this.cloneWalls(this.walls),
+      rooms: this.cloneRooms(this.rooms),
+      description
+    };
+  }
+
+  private pushUndoState(description: string): void {
+    this.undoStack.push(this.createSnapshot(description));
+    if (this.undoStack.length > 50) {
+      this.undoStack.shift();
+    }
+    this.redoStack = [];
+  }
+
+  undoLastAction(): void {
+    if (this.undoStack.length === 0) {
+      this.setSaveState('idle', 'Nothing to undo.');
+      return;
+    }
+    const snapshot = this.undoStack.pop()!;
+    this.redoStack.push(this.createSnapshot(snapshot.description));
+    this.restoreSnapshot(snapshot);
+    this.setSaveState('success', `Undid ${snapshot.description}.`);
+  }
+
+  redoLastAction(): void {
+    if (this.redoStack.length === 0) {
+      this.setSaveState('idle', 'Nothing to redo.');
+      return;
+    }
+    const snapshot = this.redoStack.pop()!;
+    this.undoStack.push(this.createSnapshot(snapshot.description));
+    this.restoreSnapshot(snapshot);
+    this.setSaveState('success', `Redid ${snapshot.description}.`);
+  }
+
+  private restoreSnapshot(snapshot: StudioSnapshot): void {
+    this.walls = this.cloneWalls(snapshot.walls);
+    this.rooms = this.cloneRooms(snapshot.rooms);
+    this.clearSelection();
+    this.rebuildMeshes();
   }
 
   private scheduleFrame(): void {

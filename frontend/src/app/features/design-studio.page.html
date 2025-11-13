@@ -101,12 +101,13 @@
         <div *ngIf="toolset==='build'" class="space-y-3 text-sm">
           <div class="font-semibold text-slate-900 dark:text-white">Build</div>
           <div class="flex flex-wrap gap-2">
-            <button class="px-3 py-1 rounded" [class.bg-gray-200]="mode==='select'" (click)="mode='select'">Select</button>
-            <button class="px-3 py-1 rounded" [class.bg-gray-200]="mode==='pan'" (click)="mode='pan'">Pan</button>
-            <button class="px-3 py-1 rounded" [class.bg-blue-200]="mode==='wall'" (click)="mode='wall'">Wall</button>
-            <button class="px-3 py-1 rounded" [class.bg-blue-200]="mode==='room'" (click)="mode='room'">Room</button>
-            <button class="px-3 py-1 rounded" [class.bg-blue-200]="mode==='door'" (click)="mode='door'">Door</button>
-            <button class="px-3 py-1 rounded" [class.bg-blue-200]="mode==='window'" (click)="mode='window'">Window</button>
+            <button class="px-3 py-1 rounded" [class.bg-gray-200]="mode==='select'" (click)="changeMode('select')">Select</button>
+            <button class="px-3 py-1 rounded" [class.bg-gray-200]="mode==='pan'" (click)="changeMode('pan')">Pan</button>
+            <button class="px-3 py-1 rounded" [class.bg-blue-200]="mode==='wall'" (click)="changeMode('wall')">Wall</button>
+            <button class="px-3 py-1 rounded" [class.bg-blue-200]="mode==='curve'" (click)="activateCurveMode()">Curve</button>
+            <button class="px-3 py-1 rounded" [class.bg-blue-200]="mode==='room'" (click)="changeMode('room')">Room</button>
+            <button class="px-3 py-1 rounded" [class.bg-blue-200]="mode==='door'" (click)="changeMode('door')">Door</button>
+            <button class="px-3 py-1 rounded" [class.bg-blue-200]="mode==='window'" (click)="changeMode('window')">Window</button>
             <button class="px-3 py-1 rounded" (click)="clearAll()">Clear</button>
           </div>
           <div class="grid grid-cols-2 gap-2 items-center">
@@ -248,6 +249,16 @@
                 </ng-container>
               </g>
             </g>
+            <g *ngIf="thicknessPreviewPaths.length">
+              <path *ngFor="let preview of thicknessPreviewPaths"
+                    [attr.d]="preview.path"
+                    fill="rgba(56,189,248,0.18)"
+                    stroke="#38bdf8"
+                    stroke-dasharray="8 4"
+                    stroke-width="2"
+                    stroke-linejoin="round"
+                    pointer-events="none"></path>
+            </g>
             <ng-container *ngIf="selectedWallIds.length > 0 && selectionBounds() as selBounds">
               <rect [attr.x]="selBounds.minX"
                     [attr.y]="selBounds.minY"
@@ -317,24 +328,24 @@
                   {{ formatLength(draftWallLengthMm()) }}
                 </text>
               </g>
-              <g *ngIf="mode==='room' && draftRoomBounds() as bounds">
-                <text [attr.x]="(bounds.minX + bounds.maxX) / 2" [attr.y]="bounds.minY - 12" text-anchor="middle" font-size="14"
-                      fill="#1d4ed8" stroke="#ffffff" stroke-width="4" stroke-linejoin="round" paint-order="stroke">
-                  {{ formatLength(bounds.maxX - bounds.minX) }}
+            <g *ngIf="mode==='room' && creating" pointer-events="none">
+              <path [attr.d]="roomDraftPathString()" stroke="#0ea5e9" stroke-width="3" stroke-dasharray="14 6" fill="none" opacity="0.75"></path>
+              <ng-container *ngFor="let vertex of roomDraftVerticesForDisplay(); let idx = index">
+                <circle [attr.cx]="vertex.x" [attr.cy]="vertex.y" [attr.r]="idx === 0 ? 8 : 6"
+                        [attr.fill]="idx === 0 ? (roomClosePreview ? 'rgba(59,130,246,0.85)' : 'rgba(59,130,246,0.55)') : '#1d4ed8'"
+                        stroke="#1e3a8a" stroke-width="2"></circle>
+              </ng-container>
+              <ng-container *ngIf="roomDraftLabel() as label">
+                <text [attr.x]="label.point.x" [attr.y]="label.point.y" text-anchor="middle" font-size="14"
+                      fill="#0f172a" stroke="#ffffff" stroke-width="4" stroke-linejoin="round" paint-order="stroke">
+                  {{ label.area }}
                 </text>
-                <text [attr.x]="(bounds.minX + bounds.maxX) / 2" [attr.y]="bounds.minY - 12" text-anchor="middle" font-size="14"
-                      fill="#1d4ed8">
-                  {{ formatLength(bounds.maxX - bounds.minX) }}
+                <text [attr.x]="label.point.x" [attr.y]="label.point.y" text-anchor="middle" font-size="14"
+                      fill="#0f172a">
+                  {{ label.area }}
                 </text>
-                <text [attr.x]="bounds.maxX + 12" [attr.y]="(bounds.minY + bounds.maxY) / 2" font-size="14"
-                      fill="#1d4ed8" stroke="#ffffff" stroke-width="4" stroke-linejoin="round" paint-order="stroke">
-                  {{ formatLength(bounds.maxY - bounds.minY) }}
-                </text>
-                <text [attr.x]="bounds.maxX + 12" [attr.y]="(bounds.minY + bounds.maxY) / 2" font-size="14"
-                      fill="#1d4ed8">
-                  {{ formatLength(bounds.maxY - bounds.minY) }}
-                </text>
-              </g>
+              </ng-container>
+            </g>
             </g>
             <g *ngIf="guideOverlay as guide" stroke="#22d3ee" stroke-width="4" stroke-dasharray="10 8" opacity="0.55">
               <line [attr.x1]="guide.start.x" [attr.y1]="guide.start.y" [attr.x2]="guide.end.x" [attr.y2]="guide.end.y"></line>
@@ -342,6 +353,42 @@
             <g *ngIf="pendingIntersection as junction">
               <circle [attr.cx]="junction.x" [attr.cy]="junction.y" r="18" fill="rgba(34,211,238,0.35)" stroke="#0891b2" stroke-width="3"></circle>
               <circle [attr.cx]="junction.x" [attr.cy]="junction.y" r="6" fill="#0e7490"></circle>
+            </g>
+            <g *ngIf="mode==='curve' && curvePreview as preview" pointer-events="none">
+              <path [attr.d]="curvePreviewPath()" stroke="#2563eb" stroke-width="3" stroke-dasharray="12 6" fill="none" opacity="0.65"></path>
+              <circle [attr.cx]="preview.center.x" [attr.cy]="preview.center.y" r="6" fill="rgba(37,99,235,0.7)" stroke="#1d4ed8" stroke-width="2"></circle>
+              <text [attr.x]="preview.center.x" [attr.y]="preview.center.y - (preview.radius + 20)" text-anchor="middle" font-size="13"
+                    fill="#1d4ed8" stroke="#ffffff" stroke-width="3" paint-order="stroke">
+                Radius {{ formatLength(preview.radius) }}
+              </text>
+              <text [attr.x]="preview.center.x" [attr.y]="preview.center.y - (preview.radius + 20)" text-anchor="middle" font-size="13" fill="#1d4ed8">
+                Radius {{ formatLength(preview.radius) }}
+              </text>
+            </g>
+            <g *ngIf="manualSplitActive && manualSplitPreview as preview" pointer-events="none">
+              <circle [attr.cx]="preview.point.x" [attr.cy]="preview.point.y" r="12" fill="rgba(37,99,235,0.25)" stroke="#2563eb" stroke-width="3"></circle>
+              <circle [attr.cx]="preview.point.x" [attr.cy]="preview.point.y" r="4" fill="#1d4ed8"></circle>
+              <text [attr.x]="preview.point.x" [attr.y]="preview.point.y - 18" text-anchor="middle" font-size="13"
+                    fill="#1d4ed8" stroke="#ffffff" stroke-width="3" paint-order="stroke">
+                {{ formatLength(preview.offset) }} from start · {{ formatLength(preview.fromEnd) }} from end
+              </text>
+              <text [attr.x]="preview.point.x" [attr.y]="preview.point.y - 18" text-anchor="middle" font-size="13" fill="#1d4ed8">
+                {{ formatLength(preview.offset) }} from start · {{ formatLength(preview.fromEnd) }} from end
+              </text>
+            </g>
+            <g *ngIf="manualSplitActive && splitHints.length" pointer-events="none">
+              <ng-container *ngFor="let hint of splitHints">
+                <circle [attr.cx]="hint.point.x" [attr.cy]="hint.point.y" r="7"
+                        [attr.fill]="activeSplitHintId === hint.id ? 'rgba(37,99,235,0.9)' : 'rgba(59,130,246,0.55)'"
+                        stroke="#1d4ed8" stroke-width="2"></circle>
+                <text [attr.x]="hint.point.x" [attr.y]="hint.point.y + 20" text-anchor="middle" font-size="11"
+                      fill="#1d4ed8" stroke="#ffffff" stroke-width="3" paint-order="stroke">
+                  {{ formatLength(hint.offset) }} / {{ formatLength(hint.fromEnd) }}
+                </text>
+                <text [attr.x]="hint.point.x" [attr.y]="hint.point.y + 20" text-anchor="middle" font-size="11" fill="#1d4ed8">
+                  {{ formatLength(hint.offset) }} / {{ formatLength(hint.fromEnd) }}
+                </text>
+              </ng-container>
             </g>
             <g *ngFor="let measurement of visibleMeasurements" stroke="#7c3aed" stroke-width="2" stroke-dasharray="12 8" fill="none">
               <line [attr.x1]="measurement.a.x" [attr.y1]="measurement.a.y" [attr.x2]="measurement.b.x" [attr.y2]="measurement.b.y"></line>
@@ -384,7 +431,41 @@
                 <span>Length</span>
                 <span class="font-semibold text-slate-900 dark:text-white">{{ formatLength(wallLengthMm(wall)) }}</span>
               </div>
-              <div class="grid grid-cols-2 gap-2">
+              <div class="mt-2 text-xs text-slate-600 dark:text-slate-300" *ngIf="selectedWallOrientation as orient">
+                Orientation:
+                <span class="font-semibold text-slate-900 dark:text-white">{{ orient.bearing }}</span>
+                ({{ orient.classification | titlecase }}, {{ orient.angle | number:'1.0-1' }}°)
+              </div>
+              <div class="mt-2 flex flex-wrap items-end gap-3">
+                <label class="flex flex-col gap-1 text-xs font-semibold text-slate-500 dark:text-slate-300">
+                  <span>Standard thickness</span>
+                  <select class="rounded border border-slate-200 px-2 py-1 text-sm dark:border-slate-700 dark:bg-slate-800"
+                          (change)="onThicknessPresetChange($any($event.target).value)">
+                    <option value="">Choose…</option>
+                    <option *ngFor="let preset of standardThicknesses" [value]="preset">{{ preset }} mm</option>
+                  </select>
+                </label>
+                <div class="flex items-center gap-2 text-xs text-slate-500 dark:text-slate-300">
+                  <span>Anchor</span>
+                  <button type="button" class="btn-ghost px-2 py-1"
+                          [class.bg-blue-500]="thicknessAnchor==='center'"
+                          [class.text-white]="thicknessAnchor==='center'"
+                          (click)="setThicknessAnchor('center')">Center</button>
+                  <button type="button" class="btn-ghost px-2 py-1"
+                          [class.bg-blue-500]="thicknessAnchor==='left'"
+                          [class.text-white]="thicknessAnchor==='left'"
+                          (click)="setThicknessAnchor('left')">Keep left</button>
+                  <button type="button" class="btn-ghost px-2 py-1"
+                          [class.bg-blue-500]="thicknessAnchor==='right'"
+                          [class.text-white]="thicknessAnchor==='right'"
+                          (click)="setThicknessAnchor('right')">Keep right</button>
+                </div>
+              </div>
+              <div class="mt-2 flex gap-2">
+                <button type="button" class="secondary px-3 py-1" (click)="applyPendingThickness()" [disabled]="pendingThickness === null">Apply thickness</button>
+                <button type="button" class="btn-ghost px-3 py-1" (click)="cancelThicknessPreview()" [disabled]="pendingThickness === null">Cancel</button>
+              </div>
+              <div class="grid grid-cols-2 gap-2 mt-2">
                 <button type="button" class="btn-ghost px-2 py-1 text-left" [disabled]="selectedWallIds.length !== 1" (click)="adjustSelectedWall('start', lengthDelta)">Extend start +</button>
                 <button type="button" class="btn-ghost px-2 py-1 text-left" [disabled]="selectedWallIds.length !== 1" (click)="adjustSelectedWall('start', -lengthDelta)">Shrink start -</button>
                 <button type="button" class="btn-ghost px-2 py-1 text-left" [disabled]="selectedWallIds.length !== 1" (click)="adjustSelectedWall('end', lengthDelta)">Extend end +</button>
@@ -413,10 +494,32 @@
                        (input)="onSelectedWallsHeightInput($any($event.target).value)"
                        min="1000" step="50" />
               </label>
+              <label class="flex items-center justify-between gap-2">
+                <span>Standard height</span>
+                <select class="w-28 rounded border border-slate-200 px-2 py-1 text-sm dark:border-slate-700 dark:bg-slate-800"
+                        (change)="applyStandardHeight($any($event.target).value)">
+                  <option value="">Choose…</option>
+                  <option *ngFor="let preset of standardHeights" [value]="preset">{{ preset }} mm</option>
+                </select>
+              </label>
+              <div>
+                <span class="text-xs font-semibold text-slate-500 dark:text-slate-300">Wall type</span>
+                <div class="mt-2 flex flex-wrap gap-2">
+                  <button
+                    *ngFor="let type of wallTypeOptions"
+                    type="button"
+                    class="btn-ghost px-3 py-1 text-xs"
+                    [class.bg-blue-500]="(selectedWallsTypeValue ?? (!selectedWalls.length ? currentWallType : null)) === type"
+                    [class.text-white]="(selectedWallsTypeValue ?? (!selectedWalls.length ? currentWallType : null)) === type"
+                    (click)="setWallType(type)">
+                    {{ type | titlecase }}
+                  </button>
+                </div>
+              </div>
               <div class="grid grid-cols-2 gap-2">
                 <button type="button" class="btn-ghost px-2 py-1 text-left" [disabled]="selectedWallIds.length !== 1" (click)="branchFromSelectedWall()">Branch from here</button>
                 <button type="button" class="btn-ghost px-2 py-1 text-left" [disabled]="selectedWallIds.length !== 1" (click)="splitSelectedWall()">Split at point</button>
-                <button type="button" class="btn-ghost px-2 py-1 text-left" [disabled]="selectedWallIds.length !== 1" (click)="curveSelectedWall()">Curve (add midpoint)</button>
+                <button type="button" class="btn-ghost px-2 py-1 text-left" [disabled]="selectedWallIds.length !== 1" (click)="curveSelectedWall()">Convert to curve</button>
                 <button type="button" class="btn-ghost px-2 py-1 text-left text-rose-600 hover:text-rose-800" (click)="deleteSelectedWall()">Delete wall</button>
               </div>
             </div>

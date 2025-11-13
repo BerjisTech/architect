@@ -57,6 +57,12 @@ export const appRoutes: Routes = [
     title: 'Provider Dashboard'
   },
   {
+    path: 'provider/quotes',
+    canActivate: [ensureAuthGuard],
+    loadComponent: () => import('./features/rfq-provider.page').then(m => m.RfqProviderPage),
+    title: 'Quote Workspace'
+  },
+  {
     path: 'profiles/:userUuid',
     loadComponent: () => import('./features/profile-view.page').then(m => m.ProfileViewPage),
     title: 'Profile'
@@ -65,6 +71,12 @@ export const appRoutes: Routes = [
     path: 'preview/listings/:token',
     loadComponent: () => import('./features/listing-preview.page').then(m => m.ListingPreviewPage),
     title: 'Listing Preview'
+  },
+  {
+    path: 'rfq/requests',
+    canActivate: [ensureAuthGuard],
+    loadComponent: () => import('./features/rfq-requests.page').then(m => m.RfqRequestsPage),
+    title: 'Requests for Quotes'
   },
   {
     path: 'studio',

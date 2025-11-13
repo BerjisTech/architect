@@ -1,0 +1,98 @@
+<div class="provider-rfq" *ngIf="!loading; else loadingTpl">
+  <section class="card">
+    <div class="section-header">
+      <h1>Invited Requests</h1>
+      <span class="badge" *ngIf="requests.length">{{ requests.length }}</span>
+    </div>
+    <ul class="request-list">
+      <li
+        *ngFor="let request of requests"
+        [class.active]="selected?.id === request.id"
+        (click)="selectRequest(request)"
+      >
+        <div>
+          <strong>{{ request.title }}</strong>
+          <p>{{ request.category | titlecase }}</p>
+        </div>
+        <span class="badge status">{{ request.status | titlecase }}</span>
+      </li>
+      <li class="empty" *ngIf="!requests.length">No open invitations.</li>
+    </ul>
+  </section>
+
+  <section class="card" *ngIf="selected">
+    <div class="section-header">
+      <div>
+        <h2>{{ selected.title }}</h2>
+        <p>{{ selected.currency }} {{ selected.budgetCents / 100 | number:'1.0-2' }}</p>
+      </div>
+      <div class="tags">
+        <span class="badge">{{ selected.status | titlecase }}</span>
+        <span class="badge" *ngIf="selected.desiredStartDate">Start {{ selected.desiredStartDate | date }}</span>
+        <span class="badge" *ngIf="selected.deadlineAt">Decision {{ selected.deadlineAt | date }}</span>
+      </div>
+    </div>
+
+    <div class="layout">
+      <form class="quote-form" [formGroup]="quoteForm" (ngSubmit)="saveQuote()">
+        <h3>Submit Quote</h3>
+        <label>Amount
+          <input type="number" min="0" formControlName="amount" />
+        </label>
+        <label>Currency
+          <input type="text" maxlength="3" formControlName="currency" />
+        </label>
+        <label>Summary
+          <textarea rows="4" formControlName="summary" placeholder="Outline scope, timelines, assumptions"></textarea>
+        </label>
+        <label>Valid Until
+          <input type="datetime-local" formControlName="expiresAt" />
+        </label>
+        <label class="toggle">
+          <input type="checkbox" formControlName="submit" />
+          <span>Mark as submitted</span>
+        </label>
+        <button type="submit" [disabled]="saving">Save Quote</button>
+      </form>
+
+      <div class="feedback">
+        <h3>Request Summary</h3>
+        <p *ngIf="selected.description">{{ selected.description }}</p>
+        <div class="quotes">
+          <h4>Other Quotes</h4>
+          <ul>
+            <li *ngFor="let quote of selected.quotes">
+              <span>{{ quote.providerUuid | slice:0:6 }}…</span>
+              <span>{{ formatAmount(quote.amountCents, quote.currency) }}</span>
+              <span>{{ quote.status | titlecase }}</span>
+            </li>
+          </ul>
+        </div>
+
+        <div class="messages">
+          <h4>Messages</h4>
+          <div class="thread">
+            <div *ngFor="let message of selected.messages" class="message">
+              <div class="meta">
+                <span>{{ message.authorRole | titlecase }}</span>
+                <span>{{ message.createdAt | date:'short' }}</span>
+              </div>
+              <p>{{ message.body }}</p>
+            </div>
+            <div *ngIf="!selected.messages.length" class="empty">No messages yet.</div>
+          </div>
+          <form [formGroup]="messageForm" (ngSubmit)="sendMessage()" class="message-form">
+            <textarea rows="3" formControlName="body" placeholder="Respond to requester"></textarea>
+            <button type="submit">Send</button>
+          </form>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <div class="alert alert--error" *ngIf="error">{{ error }}</div>
+</div>
+
+<ng-template #loadingTpl>
+  <div class="state">Loading quotes…</div>
+</ng-template>

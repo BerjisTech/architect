@@ -1,0 +1,134 @@
+<div class="rfq-page" *ngIf="!loading; else loadingTpl">
+  <div class="columns">
+    <section class="card">
+      <h1>Request Quotes</h1>
+      <p class="helper">Invite providers to respond with pricing and timelines.</p>
+      <form [formGroup]="createForm" (ngSubmit)="submitRequest()">
+        <label>Title
+          <input type="text" formControlName="title" placeholder="Kitchen renovation brief" />
+        </label>
+        <label>Category
+          <input type="text" formControlName="category" placeholder="interior_design" />
+        </label>
+        <label>Description
+          <textarea rows="4" formControlName="description"></textarea>
+        </label>
+        <div class="grid">
+          <label>Budget
+            <input type="number" min="0" formControlName="budget" />
+          </label>
+          <label>Currency
+            <input type="text" maxlength="3" formControlName="currency" />
+          </label>
+        </div>
+        <div class="grid">
+          <label>Desired Start Date
+            <input type="date" formControlName="desiredStart" />
+          </label>
+          <label>Decision Deadline
+            <input type="date" formControlName="deadline" />
+          </label>
+        </div>
+
+        <div class="invites">
+          <h3>Invite Providers</h3>
+          <ng-container formArrayName="invites">
+            <div class="invite" *ngFor="let invite of inviteControls.controls; let i = index" [formGroupName]="i">
+              <input type="text" formControlName="providerUuid" placeholder="Provider UUID" />
+              <input type="text" formControlName="listingId" placeholder="Listing ID (optional)" />
+              <button type="button" class="icon" (click)="removeInvite(i)" [disabled]="inviteControls.length <= 1">×</button>
+            </div>
+          </ng-container>
+          <button type="button" class="secondary" (click)="addInvite()">Add another provider</button>
+        </div>
+
+        <button type="submit" [disabled]="saving">Create Request</button>
+      </form>
+    </section>
+
+    <section class="card">
+      <div class="section-header">
+        <h2>My Requests</h2>
+        <span class="badge" *ngIf="requests.length">{{ requests.length }}</span>
+      </div>
+      <ul class="request-list">
+        <li *ngFor="let request of requests" [class.active]="selected?.id === request.id">
+          <button type="button" (click)="selectRequest(request)">
+            <div>
+              <strong>{{ request.title }}</strong>
+              <p>{{ request.category | titlecase }}</p>
+            </div>
+            <span class="badge status">{{ request.status | titlecase }}</span>
+          </button>
+        </li>
+        <li *ngIf="!requests.length" class="empty">No active requests yet.</li>
+      </ul>
+    </section>
+  </div>
+
+  <section class="card" *ngIf="selected">
+    <div class="section-header">
+      <div>
+        <h2>{{ selected.title }}</h2>
+        <p>{{ selected.category | titlecase }} · Budget: {{ selected.currency }} {{ selected.budgetCents / 100 | number:'1.0-2' }}</p>
+      </div>
+      <div class="actions">
+        <button type="button" class="secondary" (click)="closeSelected()" [disabled]="saving">Close</button>
+        <button type="button" class="danger" (click)="cancelSelected()" [disabled]="saving">Cancel</button>
+      </div>
+    </div>
+
+    <div class="quotes-grid">
+      <article class="quote-card" *ngFor="let quote of selected.quotes">
+        <div class="quote-head">
+          <span class="badge provider">{{ quote.providerUuid | slice:0:8 }}...</span>
+          <span [class]="statusBadge(quote.status)">{{ quote.status | titlecase }}</span>
+        </div>
+        <h3>{{ formatAmount(quote) }}</h3>
+        <p class="summary" *ngIf="quote.summary">{{ quote.summary }}</p>
+        <p class="meta">{{ quoteMetrics(quote) }}</p>
+        <div class="quote-actions">
+          <button type="button" class="secondary" (click)="acceptQuote(quote)" [disabled]="saving || quote.status === 'accepted'">Accept</button>
+          <button type="button" class="danger" (click)="rejectQuote(quote)" [disabled]="saving || quote.status === 'rejected'">Reject</button>
+        </div>
+      </article>
+    </div>
+
+    <div class="messages">
+      <h3>Messages</h3>
+      <div class="thread">
+        <div
+          class="message"
+          *ngFor="let message of selected.messages"
+          [class.message--own]="isOwnMessage(message)"
+        >
+          <div class="message-meta">
+            <span>{{ message.authorRole | titlecase }}</span>
+            <span>{{ message.createdAt | date:'medium' }}</span>
+          </div>
+          <p>{{ message.body }}</p>
+        </div>
+        <div *ngIf="!selected.messages.length" class="empty">No messages yet.</div>
+      </div>
+
+      <form [formGroup]="messageForm" (ngSubmit)="sendMessage()" class="message-form">
+        <textarea rows="3" formControlName="body" placeholder="Add an update or ask a question"></textarea>
+        <div class="message-controls">
+          <select formControlName="quoteId">
+            <option value="">General message</option>
+            <option *ngFor="let quote of selected.quotes" [value]="quote.id">
+              Quote {{ quote.providerUuid | slice:0:6 }} ({{ quote.status | titlecase }})
+            </option>
+          </select>
+          <button type="submit" [disabled]="postingMessage">Send</button>
+        </div>
+      </form>
+    </div>
+  </section>
+
+  <div class="alert alert--error" *ngIf="error">{{ error }}</div>
+</div>
+
+<ng-template #loadingTpl>
+  <div class="state state--loading">Loading RFQ workspace…</div>
+</ng-template>
