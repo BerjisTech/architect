@@ -12,4 +12,5 @@ bootstrapApplication(AppComponent, {
     provideRouter(appRoutes),
     { provide: CORE_AUTH_API_BASE, useValue: environment.apiBase }
   ]
-}).catch(err => console.error(err));
+})
+  .catch(err => console.error(err));

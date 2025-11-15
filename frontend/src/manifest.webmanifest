@@ -1,0 +1,21 @@
+{
+  "name": "Berjis Architect",
+  "short_name": "Architect",
+  "description": "Design systems, proposals, and studio workflows for Berjis teams.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0f172a",
+  "theme_color": "#1d4ed8",
+  "icons": [
+    {
+      "src": "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 256 256'%3E%3Crect width='256' height='256' rx='40' fill='%231d4ed8'/%3E%3Cpath d='M64 192L128 64l64 128' fill='none' stroke='%23fefefe' stroke-width='20' stroke-linecap='round' stroke-linejoin='round'/%3E%3Ccircle cx='128' cy='168' r='16' fill='%23facc15'/%3E%3C/svg%3E",
+      "sizes": "192x192",
+      "type": "image/svg+xml"
+    },
+    {
+      "src": "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='80' fill='%231d4ed8'/%3E%3Cpath d='M128 384L256 128l128 256' fill='none' stroke='%23fefefe' stroke-width='32' stroke-linecap='round' stroke-linejoin='round'/%3E%3Ccircle cx='256' cy='320' r='28' fill='%23facc15'/%3E%3C/svg%3E",
+      "sizes": "512x512",
+      "type": "image/svg+xml"
+    }
+  ]
+}

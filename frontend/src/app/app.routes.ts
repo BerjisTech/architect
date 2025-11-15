@@ -1,5 +1,5 @@
 import { Routes } from '@angular/router';
-import { ensureAuthGuard } from './core/guards/auth.guard';
+import { EnsureAuthGuard } from './core/guards/auth.guard';
 
 export const appRoutes: Routes = [
   {
@@ -34,31 +34,31 @@ export const appRoutes: Routes = [
   },
   {
     path: 'plans',
-    canActivate: [ensureAuthGuard],
+    canActivate: [EnsureAuthGuard],
     loadComponent: () => import('./features/plans.page').then(m => m.PlansPage),
     title: 'Plans'
   },
   {
     path: 'profile',
-    canActivate: [ensureAuthGuard],
+    canActivate: [EnsureAuthGuard],
     loadComponent: () => import('./features/profile-edit.page').then(m => m.ProfileEditPage),
     title: 'My Profile'
   },
   {
     path: 'provider/onboarding',
-    canActivate: [ensureAuthGuard],
+    canActivate: [EnsureAuthGuard],
     loadComponent: () => import('./features/provider-onboarding.page').then(m => m.ProviderOnboardingPage),
     title: 'Provider Onboarding'
   },
   {
     path: 'provider/dashboard',
-    canActivate: [ensureAuthGuard],
+    canActivate: [EnsureAuthGuard],
     loadComponent: () => import('./features/provider-dashboard.page').then(m => m.ProviderDashboardPage),
     title: 'Provider Dashboard'
   },
   {
     path: 'provider/quotes',
-    canActivate: [ensureAuthGuard],
+    canActivate: [EnsureAuthGuard],
     loadComponent: () => import('./features/rfq-provider.page').then(m => m.RfqProviderPage),
     title: 'Quote Workspace'
   },
@@ -74,13 +74,13 @@ export const appRoutes: Routes = [
   },
   {
     path: 'rfq/requests',
-    canActivate: [ensureAuthGuard],
+    canActivate: [EnsureAuthGuard],
     loadComponent: () => import('./features/rfq-requests.page').then(m => m.RfqRequestsPage),
     title: 'Requests for Quotes'
   },
   {
     path: 'studio',
-    canActivate: [ensureAuthGuard],
+    canActivate: [EnsureAuthGuard],
     loadComponent: () => import('./features/design-studio.page').then(m => m.DesignStudioPage),
     title: 'Design Studio'
   },
