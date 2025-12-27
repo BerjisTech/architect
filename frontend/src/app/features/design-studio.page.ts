@@ -237,7 +237,7 @@ export class DesignStudioPage implements OnInit, OnDestroy {
   private lastFrame = 0;
   private cameraPreset: 'perspective'|'front'|'side' = 'perspective';
   private autoOrbit = true;
-  private cam = { yaw: 0, pitch: -0.6, distance: 4500 };
+  private cam = { yaw: Math.PI / 4, pitch: 0.6, distance: 4500 };
   // FPS camera controls
   private fpsPosition = { x: 0, y: 0, z: 0 }; // Camera position offset
   private fpsMovement = { forward: false, back: false, left: false, right: false, up: false, down: false };
@@ -412,12 +412,12 @@ export class DesignStudioPage implements OnInit, OnDestroy {
     this.fpsMovement = { forward: false, back: false, left: false, right: false, up: false, down: false };
     if (preset === 'perspective') {
       this.autoOrbit = true;
-      this.cam.pitch = -0.6;
+      this.cam.pitch = 0.6;
       this.cam.yaw = Math.PI / 4;
       this.cam.distance = Math.max(this.cam.distance, 4500);
     } else {
       this.autoOrbit = false;
-      this.cam.pitch = -0.1;
+      this.cam.pitch = 0.1;
       this.cam.distance = Math.max(this.cam.distance, 3500);
       this.cam.yaw = preset === 'front' ? Math.PI / 2 : 0;
     }
@@ -1122,7 +1122,7 @@ export class DesignStudioPage implements OnInit, OnDestroy {
         this.viewPort = '2d';
         this.cameraPreset = 'perspective';
         this.autoOrbit = true;
-        this.cam.pitch = -0.6;
+        this.cam.pitch = 0.6;
         this.cam.yaw = Math.PI / 4;
         this.fpsPosition = { x: 0, y: 0, z: 0 };
         this.fpsMovement = { forward: false, back: false, left: false, right: false, up: false, down: false };
@@ -4928,14 +4928,12 @@ export class DesignStudioPage implements OnInit, OnDestroy {
     }
     const canvas = this.canvas3d?.nativeElement;
     if (!canvas) {
-      console.warn('[3D] Canvas not available yet');
       this.animationId = requestAnimationFrame(next => this.renderFrame(next));
       return;
     }
     const width = canvas.clientWidth || canvas.width;
     const height = canvas.clientHeight || canvas.height;
     if (!width || !height) {
-      console.warn('[3D] Canvas has no size:', { width, height });
       this.animationId = requestAnimationFrame(next => this.renderFrame(next));
       return;
     }
@@ -4969,18 +4967,23 @@ export class DesignStudioPage implements OnInit, OnDestroy {
 
     const camPos = this.computeCameraPosition();
     const center = this.computeSceneCenter();
+
+    // Debug once per second
+    if (!this.lastFrame || ts - this.lastFrame > 1000) {
+      console.log('[3D Debug]', {
+        camPos,
+        center,
+        walls: this.walls.length,
+        wallFaces: this.wallFaces.length,
+        roomMeshes: this.roomMeshes.length,
+        lightingPreset: this.lightingPreset,
+        isDark: this.isDark
+      });
+    }
+
     const view = this.lookAt(camPos, center, { x: 0, y: 0, z: 1 });
     const proj = this.perspectiveMatrix(Math.PI / 3, width / height, 200, 40000);
     const matrix = this.multiplyMatrices(proj, view);
-
-    console.log('[3D] Rendering:', {
-      walls: this.walls.length,
-      rooms: this.rooms.length,
-      wallFaces: this.wallFaces.length,
-      roomMeshes: this.roomMeshes.length,
-      camPos,
-      center
-    });
 
     for (const mesh of this.roomMeshes) {
       this.drawRoomMesh(ctx, matrix, mesh, width, height);
