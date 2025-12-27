@@ -238,6 +238,10 @@ export class DesignStudioPage implements OnInit, OnDestroy {
   private cameraPreset: 'perspective'|'front'|'side' = 'perspective';
   private autoOrbit = true;
   private cam = { yaw: 0, pitch: -0.6, distance: 4500 };
+  // FPS camera controls
+  private fpsPosition = { x: 0, y: 0, z: 0 }; // Camera position offset
+  private fpsMovement = { forward: false, back: false, left: false, right: false, up: false, down: false };
+  private readonly fpsMoveSpeed = 15; // mm per frame at 60fps
   private dirty3d = true;
   private renderCache: ImageData | null = null;
   private renderCacheSize = { width: 0, height: 0 };
@@ -403,6 +407,9 @@ export class DesignStudioPage implements OnInit, OnDestroy {
   private setCameraPreset(preset: 'perspective'|'front'|'side', sourceLabel?: string): void {
     const previousView = this.viewPort;
     this.cameraPreset = preset;
+    // Reset FPS position when changing camera presets
+    this.fpsPosition = { x: 0, y: 0, z: 0 };
+    this.fpsMovement = { forward: false, back: false, left: false, right: false, up: false, down: false };
     if (preset === 'perspective') {
       this.autoOrbit = true;
       this.cam.pitch = -0.6;
@@ -917,6 +924,33 @@ export class DesignStudioPage implements OnInit, OnDestroy {
     if(this.panning){ this.panning=false; }
     this.finishDragGesture();
   }
+  @HostListener('window:keyup', ['$event'])
+  handleKeyUp(event: KeyboardEvent): void {
+    if (this.viewPort !== '3d') {
+      return;
+    }
+    const key = event.key.toLowerCase();
+    switch (key) {
+      case 'a':
+        this.fpsMovement.left = false;
+        break;
+      case 'w':
+        this.fpsMovement.forward = false;
+        break;
+      case 's':
+        this.fpsMovement.back = false;
+        break;
+      case 'd':
+        this.fpsMovement.right = false;
+        break;
+      case 'q':
+        this.fpsMovement.down = false;
+        break;
+      case 'e':
+        this.fpsMovement.up = false;
+        break;
+    }
+  }
   @HostListener('window:keydown.escape') cancelGesture(){
     if(this.mode==='measure'){
       if(this.measureStart){
@@ -1090,6 +1124,8 @@ export class DesignStudioPage implements OnInit, OnDestroy {
         this.autoOrbit = true;
         this.cam.pitch = -0.6;
         this.cam.yaw = Math.PI / 4;
+        this.fpsPosition = { x: 0, y: 0, z: 0 };
+        this.fpsMovement = { forward: false, back: false, left: false, right: false, up: false, down: false };
         this.setSaveState('idle', 'Top view (Alt+J).');
         return;
       }
@@ -1108,6 +1144,42 @@ export class DesignStudioPage implements OnInit, OnDestroy {
     if (event.ctrlKey || event.metaKey || event.shiftKey) {
       return;
     }
+    // 3D view camera movement controls (AWSDQE)
+    if (this.viewPort === '3d') {
+      switch (key) {
+        case 'a':
+          event.preventDefault();
+          this.fpsMovement.left = true;
+          this.handle3dMovement();
+          return;
+        case 'w':
+          event.preventDefault();
+          this.fpsMovement.forward = true;
+          this.handle3dMovement();
+          return;
+        case 's':
+          event.preventDefault();
+          this.fpsMovement.back = true;
+          this.handle3dMovement();
+          return;
+        case 'd':
+          event.preventDefault();
+          this.fpsMovement.right = true;
+          this.handle3dMovement();
+          return;
+        case 'q':
+          event.preventDefault();
+          this.fpsMovement.down = true;
+          this.handle3dMovement();
+          return;
+        case 'e':
+          event.preventDefault();
+          this.fpsMovement.up = true;
+          this.handle3dMovement();
+          return;
+      }
+    }
+    // 2D view tool shortcuts
     switch (key) {
       case 'q':
         event.preventDefault();
@@ -4846,12 +4918,14 @@ export class DesignStudioPage implements OnInit, OnDestroy {
     }
     const canvas = this.canvas3d?.nativeElement;
     if (!canvas) {
+      console.warn('[3D] Canvas not available yet');
       this.animationId = requestAnimationFrame(next => this.renderFrame(next));
       return;
     }
     const width = canvas.clientWidth || canvas.width;
     const height = canvas.clientHeight || canvas.height;
     if (!width || !height) {
+      console.warn('[3D] Canvas has no size:', { width, height });
       this.animationId = requestAnimationFrame(next => this.renderFrame(next));
       return;
     }
@@ -4874,11 +4948,29 @@ export class DesignStudioPage implements OnInit, OnDestroy {
       this.cam.yaw += delta * 0.00012;
     }
 
+    // Apply FPS movement
+    const isMoving = this.fpsMovement.forward || this.fpsMovement.back ||
+                     this.fpsMovement.left || this.fpsMovement.right ||
+                     this.fpsMovement.up || this.fpsMovement.down;
+    if (isMoving && Number.isFinite(delta)) {
+      this.applyFpsMovement(delta);
+      this.invalidate3dCache();
+    }
+
     const camPos = this.computeCameraPosition();
     const center = this.computeSceneCenter();
     const view = this.lookAt(camPos, center, { x: 0, y: 0, z: 1 });
     const proj = this.perspectiveMatrix(Math.PI / 3, width / height, 200, 40000);
     const matrix = this.multiplyMatrices(proj, view);
+
+    console.log('[3D] Rendering:', {
+      walls: this.walls.length,
+      rooms: this.rooms.length,
+      wallFaces: this.wallFaces.length,
+      roomMeshes: this.roomMeshes.length,
+      camPos,
+      center
+    });
 
     for (const mesh of this.roomMeshes) {
       this.drawRoomMesh(ctx, matrix, mesh, width, height);
@@ -4911,10 +5003,63 @@ export class DesignStudioPage implements OnInit, OnDestroy {
       this.renderCacheSize = { width: 0, height: 0 };
       this.dirty3d = true;
     }
-    if (this.autoOrbit) {
+    // Continue rendering if auto-orbit is enabled or user is moving
+    if (this.autoOrbit || isMoving) {
       this.animationId = requestAnimationFrame(next => this.renderFrame(next));
     } else {
       this.animationId = null;
+    }
+  }
+
+  private handle3dMovement(): void {
+    // Disable auto-orbit when user takes manual control
+    if (this.autoOrbit) {
+      this.autoOrbit = false;
+      this.invalidate3dCache();
+    }
+    // Start continuous rendering if any movement is active
+    const isMoving = this.fpsMovement.forward || this.fpsMovement.back ||
+                     this.fpsMovement.left || this.fpsMovement.right ||
+                     this.fpsMovement.up || this.fpsMovement.down;
+    if (isMoving && this.animationId === null) {
+      this.scheduleFrame();
+    }
+  }
+
+  private applyFpsMovement(deltaMs: number): void {
+    const speed = this.fpsMoveSpeed * (deltaMs / 16.67); // Normalize to ~60fps
+    const yaw = this.cam.yaw;
+
+    // Calculate forward/back direction (in XY plane)
+    const forwardX = Math.cos(yaw);
+    const forwardY = Math.sin(yaw);
+
+    // Calculate right/left direction (perpendicular to forward)
+    const rightX = -Math.sin(yaw);
+    const rightY = Math.cos(yaw);
+
+    // Apply movement
+    if (this.fpsMovement.forward) {
+      this.fpsPosition.x += forwardX * speed;
+      this.fpsPosition.y += forwardY * speed;
+    }
+    if (this.fpsMovement.back) {
+      this.fpsPosition.x -= forwardX * speed;
+      this.fpsPosition.y -= forwardY * speed;
+    }
+    if (this.fpsMovement.left) {
+      this.fpsPosition.x += rightX * speed;
+      this.fpsPosition.y += rightY * speed;
+    }
+    if (this.fpsMovement.right) {
+      this.fpsPosition.x -= rightX * speed;
+      this.fpsPosition.y -= rightY * speed;
+    }
+    if (this.fpsMovement.up) {
+      this.fpsPosition.z += speed;
+    }
+    if (this.fpsMovement.down) {
+      this.fpsPosition.z -= speed;
     }
   }
 
@@ -4925,9 +5070,9 @@ export class DesignStudioPage implements OnInit, OnDestroy {
     const yaw = this.cam.yaw;
     const cosPitch = Math.cos(pitch);
     return {
-      x: center.x + Math.cos(yaw) * distance * cosPitch,
-      y: center.y + Math.sin(yaw) * distance * cosPitch,
-      z: center.z + Math.sin(pitch) * distance
+      x: center.x + Math.cos(yaw) * distance * cosPitch + this.fpsPosition.x,
+      y: center.y + Math.sin(yaw) * distance * cosPitch + this.fpsPosition.y,
+      z: center.z + Math.sin(pitch) * distance + this.fpsPosition.z
     };
   }
 

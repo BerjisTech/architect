@@ -673,11 +673,11 @@ Build a comprehensive real estate and construction platform at architect.berjis.
   - Full-screen 3D mode
 
 #### 5.7.2 3D Camera & Navigation
-- [ ] Implement 3D camera controls:
-  - **Orbit mode**: Click and drag to rotate around model
+- [x] Implement 3D camera controls:
+  - **Orbit mode**: Automatic rotation (can be disabled)
   - **Pan mode**: Right-click and drag or middle mouse to pan
   - **Zoom**: Mouse wheel or pinch gesture
-  - **Fly-through mode**: WASD + mouse to navigate like first-person
+  - **Fly-through mode**: AWSDQE for FPS-style navigation (W=forward, S=back, A=left, D=right, Q=down, E=up)
   - Smooth camera transitions with easing
 - [ ] Create preset camera views:
   - Top view (birds-eye)
