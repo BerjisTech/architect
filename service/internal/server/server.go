@@ -204,7 +204,12 @@ func RandomSuffix(n int) string {
 	ts := time.Now().UnixNano()
 	for i := 0; i < n; i++ {
 		ts = (ts*1664525 + 1013904223) % 4294967296
-		b[i] = alphabet[int(ts)%len(alphabet)]
+		idx := int(ts) % len(alphabet)
+		// Handle negative modulo result
+		if idx < 0 {
+			idx += len(alphabet)
+		}
+		b[i] = alphabet[idx]
 	}
 	return string(b)
 }

@@ -4243,8 +4243,18 @@ export class DesignStudioPage implements OnInit, OnDestroy {
     this.measureDraft = null;
     this.measurements = [];
     this.wallJoinStyle = 'miter';
+
+    // Add a default demo room for testing 3D view
+    const demoPoints: Point[] = [
+      { x: -1000, y: -1000 },
+      { x: 1000, y: -1000 },
+      { x: 1000, y: 1000 },
+      { x: -1000, y: 1000 }
+    ];
+    this.createRoomFromFootprint(demoPoints, { recordUndo: false, generateWalls: true });
+
     this.rebuildMeshes();
-    this.setSaveState('idle', 'New plan ready');
+    this.setSaveState('idle', 'New plan ready (demo room added for 3D testing)');
   }
 
   private async loadPlan(id: string): Promise<void> {
