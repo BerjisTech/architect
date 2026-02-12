@@ -1,12 +1,12 @@
 @import "https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined";
 @import "tailwindcss";
 
-/* Premium slate/blue/gold theme helpers */
+/* White + neon blue / black + gold theme */
 :root {
-  --arch-bg: 246 245 241; /* near white */
-  --arch-slate: 15 23 42; /* slate-900 */
-  --arch-blue: 30 58 138; /* blue-900 */
-  --arch-gold: 234 179 8; /* yellow-500/600 midpoint */
+  --arch-bg: 255 255 255;     /* white */
+  --arch-slate: 15 23 42;     /* slate-900 */
+  --arch-blue: 0 212 255;     /* neon blue */
+  --arch-gold: 245 197 66;    /* gold accent */
 }
 
 .sr-only {
@@ -21,18 +21,23 @@
   border: 0;
 }
 
-.hero-gradient { background: radial-gradient(1200px 600px at 80% -10%, rgba(30,58,138,0.18), transparent 60%), linear-gradient(180deg, rgb(15 23 42) 0%, rgb(30 58 138) 100%); }
-.arch-hero { background: radial-gradient(1200px 600px at 80% -10%, rgba(30,58,138,0.08), transparent 60%), radial-gradient(1000px 800px at -10% 10%, rgba(234,179,8,0.08), transparent 55%); }
+.hero-gradient { background: radial-gradient(1200px 600px at 80% -10%, rgba(0,212,255,0.12), transparent 60%), linear-gradient(180deg, #000000 0%, #0a0a0a 100%); }
+.arch-hero { background: radial-gradient(1200px 600px at 80% -10%, rgba(0,212,255,0.06), transparent 60%), radial-gradient(1000px 800px at -10% 10%, rgba(245,197,66,0.06), transparent 55%); }
 
-.elev-card { box-shadow: 0 12px 24px rgba(15,23,42,0.06), 0 4px 12px rgba(15,23,42,0.05); }
-.elev-soft { box-shadow: 0 8px 16px rgba(15,23,42,0.05); }
+.elev-card { box-shadow: 0 12px 24px rgba(0,0,0,0.06), 0 4px 12px rgba(0,0,0,0.04); }
+.dark .elev-card { box-shadow: 0 12px 24px rgba(0,0,0,0.4), 0 4px 12px rgba(0,0,0,0.3); }
+.elev-soft { box-shadow: 0 8px 16px rgba(0,0,0,0.05); }
+.dark .elev-soft { box-shadow: 0 8px 16px rgba(0,0,0,0.3); }
 .hover-rise { transition: transform .2s ease, box-shadow .2s ease; }
-.hover-rise:hover { transform: translateY(-4px); box-shadow: 0 16px 32px rgba(15,23,42,0.08); }
+.hover-rise:hover { transform: translateY(-4px); box-shadow: 0 16px 32px rgba(0,0,0,0.08); }
 
 .pill-gold { @apply inline-flex items-center rounded-full border border-yellow-400/60 bg-yellow-50 px-3 py-1 text-[11px] font-semibold text-slate-900; }
-.btn-primary { @apply inline-flex items-center rounded-xl bg-blue-900 px-5 py-2.5 text-sm font-semibold text-white shadow shadow-blue-900/30 hover:-translate-y-0.5 hover:bg-blue-800 transition; }
+.dark .pill-gold { @apply border-yellow-400/40 bg-yellow-400/10 text-yellow-300; }
+.btn-primary { @apply inline-flex items-center rounded-xl bg-[rgb(0,212,255)] px-5 py-2.5 text-sm font-semibold text-white shadow shadow-[rgba(0,212,255,0.3)] hover:-translate-y-0.5 hover:bg-[rgb(0,188,212)] transition; }
+.dark .btn-primary { @apply bg-[rgb(245,197,66)] text-black shadow-[rgba(245,197,66,0.3)] hover:bg-[rgb(251,191,36)]; }
 .btn-gold { @apply inline-flex items-center rounded-xl bg-yellow-400 px-5 py-2.5 text-sm font-semibold text-slate-900 shadow hover:-translate-y-0.5 hover:bg-yellow-300 transition; }
 .btn-ghost { @apply inline-flex items-center rounded-xl border border-slate-300 px-5 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50 transition; }
+.dark .btn-ghost { @apply border-[rgba(245,197,66,0.15)] text-slate-300 hover:bg-[rgba(245,197,66,0.06)]; }
 
 /* Section spacing */
 .section { @apply py-12; }
@@ -40,14 +45,32 @@
 @custom-variant dark (&:where(.dark, .dark *));
 
 @theme {
-  --color-bg-light-start: #eff6ff; --color-bg-light-end: #f8fafc;
-  --color-text-primary: #0f172a; --color-text-accent: #1e3a8a; --color-link: #60a5fa;
-  --color-shadow-light: rgba(30,64,175,0.15);
-  --color-bg-dark-start: #0f172a; --color-bg-dark-end: #1e3a8a; --color-text-dark: #f8fafc;
-  --color-gold: #f5c542; --color-shadow-dark: rgba(2,6,23,0.6);
+  /* ── Light: white + neon blue ── */
+  --color-bg-light-start: #ffffff;
+  --color-bg-light-end: #f0f9ff;
+  --color-text-primary: #0f172a;
+  --color-text-accent: #00bcd4;
+  --color-link: #00d4ff;
+  --color-shadow-light: rgba(0, 212, 255, 0.12);
+  /* ── Dark: black + gold ── */
+  --color-bg-dark-start: #000000;
+  --color-bg-dark-end: #0a0a0a;
+  --color-text-dark: #f8fafc;
+  --color-gold: #f5c542;
+  --color-shadow-dark: rgba(0, 0, 0, 0.6);
+  /* ── Accent tokens ── */
+  --accent: #00d4ff;
+  --accent-hover: #00bcd4;
+  --accent-text: #0891b2;
 }
 
-a { @apply text-blue-400 hover:text-blue-500 underline-offset-4 decoration-blue-300 hover:decoration-blue-500; }
+.dark {
+  --accent: #f5c542;
+  --accent-hover: #fbbf24;
+  --accent-text: #f5c542;
+}
+
+a { @apply text-[color:var(--accent)] hover:text-[color:var(--accent-hover)] underline-offset-4; }
 @keyframes gradient-pan { 0%{background-position:0% 50%}50%{background-position:100% 50%}100%{background-position:0% 50%} }
 .bg-app-gradient { background-image: linear-gradient(135deg, var(--color-bg-light-start), var(--color-bg-light-end)); background-size:200% 200%; }
 .dark .bg-app-gradient { background-image: linear-gradient(135deg, var(--color-bg-dark-start), var(--color-bg-dark-end)); }
