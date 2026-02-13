@@ -5121,9 +5121,9 @@ export class DesignStudioPage implements OnInit, OnDestroy {
 
   private lookAt(eye: { x: number; y: number; z: number }, center: { x: number; y: number; z: number }, up: { x: number; y: number; z: number }): number[] {
     const forward = this.normalize3({
-      x: eye.x - center.x,
-      y: eye.y - center.y,
-      z: eye.z - center.z
+      x: center.x - eye.x,
+      y: center.y - eye.y,
+      z: center.z - eye.z
     });
     const right = this.normalize3(this.cross3(up, forward));
     const trueUp = this.cross3(forward, right);
@@ -5253,6 +5253,7 @@ export class DesignStudioPage implements OnInit, OnDestroy {
     const base = face.corners.map(c => this.transformPoint(matrix, { x: c.x, y: c.y, z: 0 }, width, height));
     const top = face.corners.map(c => this.transformPoint(matrix, { x: c.x, y: c.y, z: this.wallHeight }, width, height));
     if (!this.areProjected(base) || !this.areProjected(top)) {
+      console.warn('[3D] Wall face projection failed', { face, base, top });
       return;
     }
     const basePts = base;
